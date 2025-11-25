@@ -13,7 +13,6 @@ It uses piper-tts to synthesize speech and converts the output to FLAC format
 with appropriate metadata.
 """
 
-import os
 import shutil
 import subprocess
 import sys
@@ -32,16 +31,16 @@ ALBUM_DIR = COLLECTION_DIR / "The Announcers - First Test"
 
 # Track definitions
 TRACKS = [
-    {"title": "Hen", "text": "One hen"},
-    {"title": "Ducks", "text": "Two ducks"},
+    {"title": "Duck", "text": "One duck"},
+    {"title": "Hens", "text": "Two hens"},
     {"title": "Geese", "text": "Three squawking geese"},
     {"title": "Oysters", "text": "Four limerick oysters"},
     {"title": "Porpoises", "text": "Five corpulent porpoises"},
     {"title": "Tweezers", "text": "Six pairs of Don Alverzo's tweezers"},
     {"title": "Macedonians", "text": "Seven thousand Macedonians in full battle array"},
     {"title": "Monkeys", "text": "Eight brass monkeys from the ancient sacred crypts of Egypt"},
-    {"title": "Men", "text": "Nine apathetic, sympathetic, diabetic old men on roller skates with a marked propensity toward procrastination and sloth"},
-    {"title": "Denizens", "text": "Ten lyrical, spherical, diabolical denizens of the deep who haul, stall, crawl, and creep through the coral reefs of the Caribbean searching for the share of the sherry sunken ship"},
+    {"title": "Men", "text": "Nine apathetic, sympathetic, diabetic old men on roller skates, with a marked propensity toward procrastination and sloth"},
+    {"title": "Denizens", "text": "Ten lyrical, spherical, diabolical denizens of the deep who all stall around the corner of the quo of the quay of the quivery, all at the same time"},
 ]
 
 
