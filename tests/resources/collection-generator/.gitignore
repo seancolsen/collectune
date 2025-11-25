@@ -32,3 +32,6 @@ Thumbs.db
 *.tmp
 *.log
 
+# Voice models
+.voices/
+

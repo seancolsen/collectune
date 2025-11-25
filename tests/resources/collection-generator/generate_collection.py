@@ -1,4 +1,10 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run --script
+# /// script
+# dependencies = [
+#   "mutagen>=1.47.0",
+#   "piper-tts>=1.3.0",
+# ]
+# ///
 """
 Generate a test audio collection using piper-tts.
 
@@ -11,19 +17,12 @@ import os
 import shutil
 import subprocess
 import sys
+import wave
 from pathlib import Path
 
-try:
-    from mutagen.flac import FLAC
-except ImportError:
-    print("Error: mutagen is not installed. Run: uv sync", file=sys.stderr)
-    sys.exit(1)
-
-try:
-    from piper import Piper
-except ImportError:
-    print("Error: piper-tts is not installed. Run: uv sync", file=sys.stderr)
-    sys.exit(1)
+from mutagen.flac import FLAC
+from piper.download_voices import download_voice
+from piper.voice import PiperVoice
 
 
 # Define the output directory relative to this script
@@ -72,14 +71,32 @@ def generate_collection():
     ALBUM_DIR.mkdir(parents=True, exist_ok=True)
     
     print(f"Generating collection in {ALBUM_DIR}")
-    print(f"Using piper-tts with model: en_GB-alan-high")
+    print(f"Using piper-tts with model: en_GB-alan-medium")
     
-    # Initialize Piper TTS
+    # Download voice model if needed
+    voice_name = "en_GB-alan-medium"
+    voice_dir = SCRIPT_DIR / ".voices"
+    voice_dir.mkdir(exist_ok=True)
+    
+    print(f"Downloading voice model: {voice_name}")
     try:
-        piper = Piper(model="en_GB-alan-high")
+        download_voice(voice_name, voice_dir, force_redownload=False)
     except Exception as e:
-        print(f"Error initializing Piper: {e}", file=sys.stderr)
-        print("Make sure the en_GB-alan-high model is available.", file=sys.stderr)
+        print(f"Error downloading voice: {e}", file=sys.stderr)
+        sys.exit(1)
+    
+    # Find the model file
+    model_path = voice_dir / f"{voice_name}.onnx"
+    if not model_path.exists():
+        print(f"Error: Voice model not found at {model_path}", file=sys.stderr)
+        sys.exit(1)
+    
+    # Load Piper voice
+    print(f"Loading voice model: {model_path}")
+    try:
+        voice = PiperVoice.load(model_path)
+    except Exception as e:
+        print(f"Error loading voice: {e}", file=sys.stderr)
         sys.exit(1)
     
     # Generate each track
@@ -96,8 +113,21 @@ def generate_collection():
         flac_path = ALBUM_DIR / f"{track_num}. {title}.flac"
         
         try:
-            # Generate WAV file using piper-tts
-            piper.synthesize(text, str(wav_path))
+            # Generate audio chunks using piper-tts
+            audio_chunks = voice.synthesize(text)
+            
+            # Write audio chunks to WAV file
+            first_chunk = True
+            with wave.open(str(wav_path), "wb") as wav_file:
+                for chunk in audio_chunks:
+                    if first_chunk:
+                        # Set WAV file parameters from first chunk
+                        wav_file.setnchannels(chunk.sample_channels)
+                        wav_file.setsampwidth(chunk.sample_width)
+                        wav_file.setframerate(chunk.sample_rate)
+                        first_chunk = False
+                    # Write audio data
+                    wav_file.writeframes(chunk.audio_int16_bytes)
             
             # Convert WAV to FLAC using ffmpeg
             subprocess.run(
