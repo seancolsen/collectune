@@ -1,3 +1,5 @@
+mod db;
+
 use clap::Parser;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -16,7 +18,7 @@ struct Args {
 
 fn scan_directory_recursive(dir: &Path) -> Vec<PathBuf> {
     let mut files = Vec::new();
-    
+
     if let Ok(entries) = fs::read_dir(dir) {
         for entry in entries {
             if let Ok(entry) = entry {
@@ -30,7 +32,7 @@ fn scan_directory_recursive(dir: &Path) -> Vec<PathBuf> {
             }
         }
     }
-    
+
     files
 }
 
@@ -42,7 +44,7 @@ fn process_audio_file(file_path: &Path) -> Option<(Option<String>, Option<String
     };
 
     let mss = MediaSourceStream::new(Box::new(file), Default::default());
-    
+
     // Create a hint to help the format registry guess the format
     let mut hint = Hint::new();
     if let Some(extension) = file_path.extension() {
@@ -62,7 +64,7 @@ fn process_audio_file(file_path: &Path) -> Option<(Option<String>, Option<String
 
     // Extract metadata - need to read packets to fully populate metadata for some formats like FLAC
     let mut format = probed.format;
-    
+
     // Read a few packets to ensure metadata is fully loaded (especially for FLAC)
     let mut packets_read = 0;
     while packets_read < 10 {
@@ -71,11 +73,11 @@ fn process_audio_file(file_path: &Path) -> Option<(Option<String>, Option<String
             Err(_) => break,
         }
     }
-    
+
     // Now extract metadata from the format
     let mut artist: Option<String> = None;
     let mut title: Option<String> = None;
-    
+
     let metadata = format.metadata();
     if let Some(metadata_rev) = metadata.current() {
         for tag in metadata_rev.tags() {
@@ -87,7 +89,7 @@ fn process_audio_file(file_path: &Path) -> Option<(Option<String>, Option<String
             if title.is_none() && (tag_key_lower == "title" || tag_key_lower == "tracktitle") {
                 title = Some(tag.value.to_string());
             }
-            
+
             // Also check standard keys
             match tag.std_key {
                 Some(symphonia::core::meta::StandardTagKey::Artist) => {
@@ -112,16 +114,27 @@ fn main() {
     let args = Args::parse();
 
     let path = Path::new(&args.collection_path);
-    
+
     if !path.exists() {
         eprintln!("Error: The path '{}' does not exist.", args.collection_path);
         std::process::exit(1);
     }
-    
+
     if !path.is_dir() {
-        eprintln!("Error: The path '{}' is not a directory.", args.collection_path);
+        eprintln!(
+            "Error: The path '{}' is not a directory.",
+            args.collection_path
+        );
         std::process::exit(1);
     }
+
+    let _connection = match db::get_db(path) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("Error initializing database: {}", e);
+            std::process::exit(1);
+        }
+    };
 
     // Recursively scan the directory for all files
     let files = scan_directory_recursive(path);
