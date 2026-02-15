@@ -12,31 +12,24 @@ struct Args {
     collection_path: String,
 }
 
-fn get_validated_collection_path(path_str: &String) -> &Path {
+fn get_collection_path(path_str: &String) -> Result<&Path, String> {
     let path = Path::new(path_str);
 
     if !path.exists() {
-        eprintln!("Error: The path '{}' does not exist.", path_str);
-        std::process::exit(1);
+        return Err(format!("The path '{}' does not exist.", path_str));
     }
 
     if !path.is_dir() {
-        eprintln!("Error: The path '{}' is not a directory.", path_str);
-        std::process::exit(1);
+        return Err(format!("The path '{}' is not a directory.", path_str));
     }
 
-    path
+    Ok(path)
 }
 
-fn main() {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
-    let collection_path = get_validated_collection_path(&args.collection_path);
-    let _db = match db::get_db(collection_path) {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("Error initializing database: {}", e);
-            std::process::exit(1);
-        }
-    };
+    let collection_path = get_collection_path(&args.collection_path)?;
+    let _db = db::get_db(collection_path)?;
     scanner::scan(collection_path);
+    Ok(())
 }
