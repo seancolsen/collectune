@@ -34,7 +34,7 @@ create table artist (
 
 create table album (
   id uuid primary key,
-  name text,
+  title text,
   year usmallint
 );
 
