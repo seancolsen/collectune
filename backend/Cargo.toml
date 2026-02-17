@@ -6,4 +6,5 @@ edition = "2024"
 [dependencies]
 clap = { version = "4.5", features = ["derive"] }
 symphonia = { version = "0.5", features = ["all"] }
+jiff = "0.2"
 duckdb = { version = "1.4.4", features = ["bundled"] }
