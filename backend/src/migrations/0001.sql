@@ -17,14 +17,22 @@ create type format as enum (
   'webm'
 );
 
+create table deletion (
+  id uuid primary key,
+  timestamp datetime not null default now(),
+  comment text
+);
+
 create table file (
   id uuid primary key,
-  path text not null,
-  hash blob not null,
+  path text unique not null,
+  hash blob not null, -- (Note: possible for two files to have the same hash)
   size uinteger not null,
   format format not null,
   duration real not null,
-  added timestamp not null
+  added timestamp not null,
+  deletion uuid,
+  foreign key (deletion) references deletion(id)
 );
 
 create table artist (
