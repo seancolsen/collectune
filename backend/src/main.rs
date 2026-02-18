@@ -29,7 +29,7 @@ fn get_collection_path(path_str: &String) -> Result<&Path, String> {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
     let collection_path = get_collection_path(&args.collection_path)?;
-    let _db = db::get_db(collection_path)?;
-    scanner::scan(collection_path);
+    let conn = db::get_db(collection_path)?;
+    scanner::scan(collection_path, &conn)?;
     Ok(())
 }

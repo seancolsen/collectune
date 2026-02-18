@@ -1,52 +1,27 @@
-use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use symphonia::core::formats::FormatOptions;
 use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::{MetadataOptions, StandardTagKey, Tag, Value};
-use symphonia::core::probe::Hint;
+use symphonia::core::probe::{Hint, ProbeResult};
 
-static AUDIO_EXTENSIONS: &[&str] = &[
-    "mp3", "flac", "ogg", "m4a", "opus", "wma", "aac", "aiff", "aif", "alac", "ape", "wav", "wv",
-];
+use super::types::{TrackArtistMetadata, TrackMetadata};
 
-fn is_audio_file(path: &Path) -> bool {
-    path.extension()
-        .and_then(|ext| ext.to_str())
-        .is_some_and(|ext| AUDIO_EXTENSIONS.contains(&ext.to_ascii_lowercase().as_str()))
-}
-
-fn get_audio_files(dir: &Path) -> Vec<PathBuf> {
-    let mut files = Vec::new();
-    if let Ok(entries) = fs::read_dir(dir) {
-        for entry in entries {
-            if let Ok(entry) = entry {
-                let path = entry.path();
-                if path.is_dir() {
-                    files.extend(get_audio_files(&path));
-                } else if path.is_file() && is_audio_file(&path) {
-                    files.push(path);
-                }
-            }
-        }
+pub fn extension_to_format(ext: &str) -> Option<&'static str> {
+    match ext.to_ascii_lowercase().as_str() {
+        "aac" => Some("aac"),
+        "aif" | "aiff" => Some("aiff"),
+        "alac" => Some("alac"),
+        "ape" => Some("ape"),
+        "flac" => Some("flac"),
+        "m4a" => Some("mp4"),
+        "mp3" => Some("mp3"),
+        "ogg" => Some("ogg"),
+        "opus" => Some("opus"),
+        "wav" => Some("wav"),
+        "wma" => Some("wma"),
+        "wv" => Some("wv"),
+        _ => None,
     }
-    files
-}
-
-#[derive(Debug)]
-struct TrackMetadata {
-    title: String,
-    track_number: Option<u8>,
-    disc_number: Option<u8>,
-    genre: String,
-    album: String,
-    year: Option<u16>,
-    artists: Vec<TrackArtistMetadata>,
-}
-
-#[derive(Debug)]
-struct TrackArtistMetadata {
-    artist: String,
-    role: Option<String>,
 }
 
 fn parse_tag_value_into_u8(value: &Value) -> Option<u8> {
@@ -93,13 +68,12 @@ fn assemble_tags_into_metadata<'a, T: IntoIterator<Item = &'a Tag>>(tags: T) -> 
     let mut album_values = Vec::<String>::new();
     let mut genre_values = Vec::<String>::new();
 
-    let append_string_value = |value: &Value, container: &mut Vec<String>| match value {
-        Value::String(v) => {
-            if !container.contains(v) {
-                container.push(v.clone());
-            }
+    let append_string_value = |value: &Value, container: &mut Vec<String>| {
+        if let Value::String(v) = value
+            && !container.contains(v)
+        {
+            container.push(v.clone());
         }
-        _ => (),
     };
 
     let mut date_value: Option<u16> = None;
@@ -142,44 +116,62 @@ fn assemble_tags_into_metadata<'a, T: IntoIterator<Item = &'a Tag>>(tags: T) -> 
     }
 }
 
-fn get_track_metadata(file_path: &PathBuf) -> Option<TrackMetadata> {
-    let file = std::fs::File::open(&file_path).ok()?;
+fn probe_file(file_path: &Path) -> Option<(ProbeResult, f64)> {
+    let file = std::fs::File::open(file_path).ok()?;
+    let mss = MediaSourceStream::new(Box::new(file), Default::default());
 
-    // Guard against panics in symphonia, just to be safe and avoid crashing. For example, in my
-    // testing I observed that symphonia seems panic when it hit a .mood file.
+    let mut hint = Hint::new();
+    if let Some(ext_str) = file_path.extension().and_then(|e| e.to_str()) {
+        hint.with_extension(ext_str);
+    }
+
+    let meta_opts: MetadataOptions = Default::default();
+    let fmt_opts: FormatOptions = Default::default();
+
+    let probed = symphonia::default::get_probe()
+        .format(&hint, mss, &fmt_opts, &meta_opts)
+        .ok()?;
+
+    let duration_secs = probed.format.default_track().and_then(|track| {
+        let params = &track.codec_params;
+        let time_base = params.time_base?;
+        let n_frames = params.n_frames?;
+        let time = time_base.calc_time(n_frames);
+        Some(time.seconds as f64 + time.frac)
+    });
+
+    Some((probed, duration_secs.unwrap_or(0.0)))
+}
+
+/// Analyze a file to get its duration in seconds. Returns 0.0 if undetermined.
+pub fn get_duration(file_path: &Path) -> f64 {
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let mss = MediaSourceStream::new(Box::new(file), Default::default());
-
-        // Create a hint to help the format registry guess the format
-        let mut hint = Hint::new();
-        if let Some(extension) = file_path.extension() {
-            if let Some(ext_str) = extension.to_str() {
-                hint.with_extension(ext_str);
-            }
+        probe_file(file_path).map(|(_, d)| d).unwrap_or(0.0)
+    }));
+    match result {
+        Ok(d) => d,
+        Err(_) => {
+            eprintln!("Warning: panic while probing {:?}, skipping duration", file_path);
+            0.0
         }
+    }
+}
 
-        // Probe the file for metadata
-        let meta_opts: MetadataOptions = Default::default();
-        let fmt_opts: FormatOptions = Default::default();
-
-        let mut probed = symphonia::default::get_probe()
-            .format(&hint, mss, &fmt_opts, &meta_opts)
-            .ok()?;
-
-        // Extract metadata - need to read packets to fully populate metadata for some formats like
-        // FLAC
-        let mut format = probed.format;
+/// Extract full track metadata (tags) plus duration from an audio file.
+pub fn get_track_metadata(file_path: &Path) -> Option<(TrackMetadata, f64)> {
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let (mut probed, duration) = probe_file(file_path)?;
 
         // Read a few packets to ensure metadata is fully loaded (especially for FLAC)
         let mut packets_read = 0;
         while packets_read < 10 {
-            match format.next_packet() {
+            match probed.format.next_packet() {
                 Ok(_) => packets_read += 1,
                 Err(_) => break,
             }
         }
 
-        // e.g. for ID3v1/ID3v2 tags in MP3 files
+        // ID3v1/ID3v2 tags (e.g. MP3 files)
         let probed_meta = probed.metadata.get();
         let probed_tags = probed_meta
             .as_ref()
@@ -188,8 +180,8 @@ fn get_track_metadata(file_path: &PathBuf) -> Option<TrackMetadata> {
             .unwrap_or_default()
             .iter();
 
-        // e.g. for Vorbis comments in FLAC/OGG
-        let format_meta = format.metadata();
+        // Vorbis comments (e.g. FLAC/OGG files)
+        let format_meta = probed.format.metadata();
         let format_tags = format_meta
             .current()
             .map(|r| r.tags())
@@ -198,23 +190,14 @@ fn get_track_metadata(file_path: &PathBuf) -> Option<TrackMetadata> {
 
         let metadata = assemble_tags_into_metadata(probed_tags.chain(format_tags));
 
-        Some(metadata)
+        Some((metadata, duration))
     }));
 
     match result {
-        Ok(metadata) => metadata,
+        Ok(inner) => inner,
         Err(_) => {
             eprintln!("Warning: panic while reading {:?}, skipping", file_path);
             None
-        }
-    }
-}
-
-pub fn scan(collection_path: &Path) {
-    for file_path in get_audio_files(collection_path) {
-        if let Some(metadata) = get_track_metadata(&file_path) {
-            println!("{:?}", file_path);
-            println!("{:?}", metadata);
         }
     }
 }

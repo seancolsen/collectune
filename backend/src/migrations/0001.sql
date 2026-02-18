@@ -3,6 +3,7 @@ create type format as enum (
   'adpcm',
   'aiff',
   'alac',
+  'ape',
   'caf',
   'flac',
   'mkv',
@@ -14,7 +15,9 @@ create type format as enum (
   'opus',
   'vorbis',
   'wav',
-  'webm'
+  'webm',
+  'wma',
+  'wv'
 );
 
 create table deletion (
