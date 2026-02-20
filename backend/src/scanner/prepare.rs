@@ -90,6 +90,7 @@ pub fn prepare_staging_data(
             size: nf.size,
             format: nf.format.clone(),
             duration: nf.duration,
+            mtime: nf.mtime,
         });
 
         let album_dir = album_directory(Path::new(&nf.path)).unwrap_or_default();
@@ -125,6 +126,7 @@ pub fn prepare_staging_data(
         .map(|m| StagingMoved {
             id: m.id,
             new_path: m.path.clone(),
+            mtime: m.mtime,
         })
         .collect();
 
@@ -136,6 +138,7 @@ pub fn prepare_staging_data(
             hash: m.hash,
             size: m.size,
             duration: m.duration,
+            mtime: m.mtime,
         })
         .collect();
 

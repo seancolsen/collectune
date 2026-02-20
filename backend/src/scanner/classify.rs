@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::UNIX_EPOCH;
 
 use rayon::prelude::*;
 use uuid::Uuid;
@@ -38,69 +39,78 @@ fn hash_file(path: &Path) -> Option<[u8; 32]> {
     Some(*blake3::hash(&data).as_bytes())
 }
 
-fn file_size(path: &Path) -> u64 {
-    fs::metadata(path).map(|m| m.len()).unwrap_or(0)
-}
-
 fn classify_file(path: &Path, existing: &ExistingFiles) -> Option<FileClassification> {
     let path_str = path.to_string_lossy().to_string();
+    let meta = fs::metadata(path).ok()?;
+    let size = meta.len();
+    let mtime = meta.modified().ok()?.duration_since(UNIX_EPOCH).ok()?.as_micros() as i64;
 
-    let hash = hash_file(path)?;
-    let path_match = existing.by_path.get(&path_str);
-    let hash_match = existing.by_hash.get(&hash);
-
-    match (path_match, hash_match) {
-        // Both match: file is unchanged
-        (Some((_, existing_hash)), _) if *existing_hash == hash => {
-            Some(FileClassification::Skipped { path: path_str })
+    if let Some((_, _, existing_size, existing_mtime)) = existing.by_path.get(&path_str) {
+        if size == *existing_size && mtime == *existing_mtime {
+            return Some(FileClassification::Skipped { path: path_str });
         }
 
-        // Hash matches but path does not (path_match is None or hash differs)
-        (None, Some(entries)) => {
-            // Find the first entry whose original path no longer exists on disk
-            for (id, original_path) in entries {
-                if !Path::new(original_path).exists() {
-                    return Some(FileClassification::Moved {
-                        id: *id,
-                        path: path_str,
-                    });
-                }
-            }
-            // All original paths still exist: treat as new
-            classify_as_new(path_str, hash)
-        }
+        // mtime or size changed -- hash to determine if content actually changed
+        let hash = hash_file(path)?;
+        let (id, existing_hash, _, _) = existing.by_path.get(&path_str).unwrap();
 
-        // Path matches but hash does not: modified
-        (Some((id, _)), _) => {
-            let size = file_size(path);
+        if hash == *existing_hash {
+            // Content identical; just mtime drifted. Record as modified so we
+            // persist the new mtime (hash/size/duration will be unchanged).
             let duration = get_duration(path);
-            Some(FileClassification::Modified {
+            return Some(FileClassification::Modified {
                 id: *id,
                 path: path_str,
                 hash,
                 size,
                 duration,
-            })
+                mtime,
+            });
         }
 
-        // Neither matches: new
-        (None, None) => classify_as_new(path_str, hash),
+        let duration = get_duration(path);
+        return Some(FileClassification::Modified {
+            id: *id,
+            path: path_str,
+            hash,
+            size,
+            duration,
+            mtime,
+        });
     }
+
+    // Path not in DB -- hash to check for moves or treat as new
+    let hash = hash_file(path)?;
+
+    if let Some(entries) = existing.by_hash.get(&hash) {
+        for (id, original_path) in entries {
+            if !Path::new(original_path).exists() {
+                return Some(FileClassification::Moved {
+                    id: *id,
+                    path: path_str,
+                    mtime,
+                });
+            }
+        }
+    }
+
+    classify_as_new(path_str, hash, mtime)
 }
 
-fn classify_as_new(path_str: String, hash: [u8; 32]) -> Option<FileClassification> {
+fn classify_as_new(path_str: String, hash: [u8; 32], mtime: i64) -> Option<FileClassification> {
     let path = Path::new(&path_str);
     let ext = path.extension()?.to_str()?;
     let format = extension_to_format(ext)?;
 
     let (metadata, duration) = get_track_metadata(path)?;
-    let size = file_size(path);
+    let size = fs::metadata(path).map(|m| m.len()).unwrap_or(0);
 
     Some(FileClassification::New(NewFileData {
         path: path_str,
         hash,
         size,
         duration,
+        mtime,
         format: format.to_string(),
         metadata,
     }))
@@ -115,19 +125,23 @@ fn aggregate(classifications: Vec<FileClassification>) -> ScanResults {
     for c in classifications {
         match c {
             FileClassification::Skipped { path } => skipped.push(path),
-            FileClassification::Moved { id, path } => moved.push(MovedEntry { id, path }),
+            FileClassification::Moved { id, path, mtime } => {
+                moved.push(MovedEntry { id, path, mtime })
+            }
             FileClassification::Modified {
                 id,
                 path,
                 hash,
                 size,
                 duration,
+                mtime,
             } => modified.push(ModifiedEntry {
                 id,
                 path,
                 hash,
                 size,
                 duration,
+                mtime,
             }),
             FileClassification::New(data) => new_files.push(data),
         }
@@ -152,7 +166,9 @@ pub fn resolve_conflicts(results: &mut ScanResults) {
         .collect();
 
     for entry in conflicting {
-        if let Some(FileClassification::New(data)) = classify_as_new(entry.path, entry.hash) {
+        if let Some(FileClassification::New(data)) =
+            classify_as_new(entry.path, entry.hash, entry.mtime)
+        {
             results.new_files.push(data);
         }
     }
@@ -171,7 +187,6 @@ pub fn detect_deletions(results: &ScanResults, existing: &ExistingFiles) -> Vec<
     for n in &results.new_files {
         known_paths.insert(&n.path);
     }
-    // Modified files still exist at their original path
     for m in &results.modified {
         known_paths.insert(&m.path);
     }
@@ -180,15 +195,12 @@ pub fn detect_deletions(results: &ScanResults, existing: &ExistingFiles) -> Vec<
         .by_path
         .iter()
         .filter(|(path, _)| !known_paths.contains(path.as_str()))
-        .map(|(_, (id, _))| *id)
+        .map(|(_, (id, _, _, _))| *id)
         .collect()
 }
 
 /// Discover audio files and classify them in parallel against existing DB state.
-pub fn classify_all(
-    collection_path: &Path,
-    existing: &ExistingFiles,
-) -> ScanResults {
+pub fn classify_all(collection_path: &Path, existing: &ExistingFiles) -> ScanResults {
     let audio_files = get_audio_files(collection_path);
 
     let classifications: Vec<FileClassification> = audio_files

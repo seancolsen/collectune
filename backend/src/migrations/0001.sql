@@ -33,6 +33,7 @@ create table file (
   size uinteger not null,
   format format not null,
   duration real not null,
+  mtime bigint not null, -- filesystem mtime as microseconds since epoch
   added timestamp not null,
   deletion uuid,
   foreign key (deletion) references deletion(id)

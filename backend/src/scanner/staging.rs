@@ -25,26 +25,28 @@ pub fn load_existing_artists(conn: &Connection) -> Result<HashMap<String, Uuid>,
 
 pub fn load_existing_files(conn: &Connection) -> Result<ExistingFiles, duckdb::Error> {
     let mut stmt =
-        conn.prepare("SELECT id, path, hash FROM file WHERE deletion IS NULL")?;
+        conn.prepare("SELECT id, path, hash, size, mtime FROM file WHERE deletion IS NULL")?;
     let rows = stmt.query_map([], |row| {
         let id_str: String = row.get(0)?;
         let path: String = row.get(1)?;
         let hash_blob: Vec<u8> = row.get(2)?;
-        Ok((id_str, path, hash_blob))
+        let size: u32 = row.get(3)?;
+        let mtime: i64 = row.get(4)?;
+        Ok((id_str, path, hash_blob, size as u64, mtime))
     })?;
 
     let mut by_path = HashMap::new();
     let mut by_hash: HashMap<[u8; 32], Vec<(Uuid, String)>> = HashMap::new();
 
     for row in rows {
-        let (id_str, path, hash_blob) = row?;
+        let (id_str, path, hash_blob, size, mtime) = row?;
         let Ok(id) = Uuid::parse_str(&id_str) else {
             continue;
         };
         let Ok(hash): Result<[u8; 32], _> = hash_blob.try_into() else {
             continue;
         };
-        by_path.insert(path.clone(), (id, hash));
+        by_path.insert(path.clone(), (id, hash, size, mtime));
         by_hash.entry(hash).or_default().push((id, path));
     }
 
@@ -58,15 +60,15 @@ pub fn create_staging_tables(conn: &Connection) -> Result<(), duckdb::Error> {
         CREATE TEMP TABLE staging_album (id UUID, title TEXT, year USMALLINT);
         CREATE TEMP TABLE staging_file (
             id UUID, path TEXT, hash BLOB, size UINTEGER,
-            format format, duration REAL
+            format format, duration REAL, mtime BIGINT
         );
         CREATE TEMP TABLE staging_track (
             id UUID, file UUID, title TEXT, album UUID,
             disc_number UTINYINT, track_number UTINYINT, genre TEXT
         );
         CREATE TEMP TABLE staging_credit (track UUID, artist UUID, ord REAL, role TEXT);
-        CREATE TEMP TABLE staging_moved (id UUID, new_path TEXT);
-        CREATE TEMP TABLE staging_modified (id UUID, hash BLOB, size UINTEGER, duration REAL);
+        CREATE TEMP TABLE staging_moved (id UUID, new_path TEXT, mtime BIGINT);
+        CREATE TEMP TABLE staging_modified (id UUID, hash BLOB, size UINTEGER, duration REAL, mtime BIGINT);
         CREATE TEMP TABLE staging_deleted (file_id UUID, deletion_id UUID);
         ",
     )
@@ -100,6 +102,7 @@ pub fn insert_staging_data(conn: &Connection, data: &StagingData) -> Result<(), 
                 f.size as u32,
                 f.format,
                 f.duration as f32,
+                f.mtime,
             ])?;
         }
         app.flush()?;
@@ -141,7 +144,7 @@ pub fn insert_staging_data(conn: &Connection, data: &StagingData) -> Result<(), 
     {
         let mut app = conn.appender("staging_moved")?;
         for m in &data.moved {
-            app.append_row(params![m.id.to_string(), m.new_path])?;
+            app.append_row(params![m.id.to_string(), m.new_path, m.mtime])?;
         }
         app.flush()?;
     }
@@ -154,6 +157,7 @@ pub fn insert_staging_data(conn: &Connection, data: &StagingData) -> Result<(), 
                 m.hash.as_slice(),
                 m.size as u32,
                 m.duration as f32,
+                m.mtime,
             ])?;
         }
         app.flush()?;
@@ -176,8 +180,8 @@ BEGIN TRANSACTION;
 INSERT INTO artist (id, name) SELECT id, name FROM staging_artist;
 INSERT INTO album (id, title, year) SELECT id, title, year FROM staging_album;
 
-INSERT INTO file (id, path, hash, size, format, duration, added, deletion)
-SELECT id, path, hash, size, format, duration, now(), NULL FROM staging_file;
+INSERT INTO file (id, path, hash, size, format, duration, mtime, added, deletion)
+SELECT id, path, hash, size, format, duration, mtime, now(), NULL FROM staging_file;
 
 INSERT INTO track (id, file, start_position, end_position, title, album,
                    disc_number, track_number, genre, rating)
@@ -187,10 +191,10 @@ FROM staging_track;
 INSERT INTO credit (track, artist, ord, role)
 SELECT track, artist, ord, role FROM staging_credit;
 
-UPDATE file SET path = sm.new_path
+UPDATE file SET path = sm.new_path, mtime = sm.mtime
 FROM staging_moved sm WHERE file.id = sm.id;
 
-UPDATE file SET hash = sm.hash, size = sm.size, duration = sm.duration
+UPDATE file SET hash = sm.hash, size = sm.size, duration = sm.duration, mtime = sm.mtime
 FROM staging_modified sm WHERE file.id = sm.id;
 
 INSERT INTO deletion (id, timestamp)

@@ -19,7 +19,7 @@ pub struct TrackArtistMetadata {
 }
 
 pub struct ExistingFiles {
-    pub by_path: HashMap<String, (Uuid, [u8; 32])>,
+    pub by_path: HashMap<String, (Uuid, [u8; 32], u64, i64)>, // id, hash, size, mtime_us
     pub by_hash: HashMap<[u8; 32], Vec<(Uuid, String)>>,
 }
 
@@ -30,6 +30,7 @@ pub enum FileClassification {
     Moved {
         id: Uuid,
         path: String,
+        mtime: i64,
     },
     Modified {
         id: Uuid,
@@ -37,6 +38,7 @@ pub enum FileClassification {
         hash: [u8; 32],
         size: u64,
         duration: f64,
+        mtime: i64,
     },
     New(NewFileData),
 }
@@ -46,6 +48,7 @@ pub struct NewFileData {
     pub hash: [u8; 32],
     pub size: u64,
     pub duration: f64,
+    pub mtime: i64,
     pub format: String,
     pub metadata: TrackMetadata,
 }
@@ -53,6 +56,7 @@ pub struct NewFileData {
 pub struct MovedEntry {
     pub id: Uuid,
     pub path: String,
+    pub mtime: i64,
 }
 
 pub struct ModifiedEntry {
@@ -61,6 +65,7 @@ pub struct ModifiedEntry {
     pub hash: [u8; 32],
     pub size: u64,
     pub duration: f64,
+    pub mtime: i64,
 }
 
 pub struct ScanResults {
@@ -88,6 +93,7 @@ pub struct StagingFile {
     pub size: u64,
     pub format: String,
     pub duration: f64,
+    pub mtime: i64,
 }
 
 pub struct StagingTrack {
@@ -110,6 +116,7 @@ pub struct StagingCredit {
 pub struct StagingMoved {
     pub id: Uuid,
     pub new_path: String,
+    pub mtime: i64,
 }
 
 pub struct StagingModified {
@@ -117,6 +124,7 @@ pub struct StagingModified {
     pub hash: [u8; 32],
     pub size: u64,
     pub duration: f64,
+    pub mtime: i64,
 }
 
 pub struct StagingDeleted {
