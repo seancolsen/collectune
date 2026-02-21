@@ -11,6 +11,14 @@ mod server;
 struct Args {
     /// Path to the collection of audio files
     collection_path: String,
+
+    /// Start without running a full collection scan
+    #[arg(long)]
+    no_scan: bool,
+
+    /// Port to listen on
+    #[arg(short, long, default_value_t = 3000)]
+    port: u16,
 }
 
 fn get_collection_path(path_str: &String) -> Result<&Path, String> {
@@ -32,7 +40,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
     let collection_path = get_collection_path(&args.collection_path)?;
     let conn = db::get_db(collection_path)?;
-    scanner::scan(collection_path, &conn)?;
-    server::serve(conn).await?;
+    if !args.no_scan {
+        scanner::scan(collection_path, &conn)?;
+    }
+    server::serve(conn, args.port).await?;
     Ok(())
 }

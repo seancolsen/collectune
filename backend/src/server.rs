@@ -119,7 +119,7 @@ async fn query(
     }
 }
 
-pub async fn serve(conn: Connection) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn serve(conn: Connection, port: u16) -> Result<(), Box<dyn std::error::Error>> {
     let state = Arc::new(AppState {
         db: Mutex::new(conn),
     });
@@ -129,9 +129,9 @@ pub async fn serve(conn: Connection) -> Result<(), Box<dyn std::error::Error>> {
         .layer(CorsLayer::permissive())
         .with_state(state);
 
-    let addr = "0.0.0.0:3000";
+    let addr = format!("0.0.0.0:{port}");
     println!("Listening on {addr}");
-    let listener = tokio::net::TcpListener::bind(addr).await?;
+    let listener = tokio::net::TcpListener::bind(&addr).await?;
     axum::serve(listener, app).await?;
     Ok(())
 }
