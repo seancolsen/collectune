@@ -7,7 +7,9 @@ use rayon::prelude::*;
 use uuid::Uuid;
 
 use super::metadata::{extension_to_format, get_duration, get_track_metadata};
-use super::types::*;
+use super::types::{
+    ExistingFiles, FileClassification, ModifiedEntry, MovedEntry, NewFileData, ScanResults,
+};
 
 static AUDIO_EXTENSIONS: &[&str] = &[
     "mp3", "flac", "ogg", "m4a", "opus", "wma", "aac", "aiff", "aif", "alac", "ape", "wav", "wv",
@@ -43,7 +45,12 @@ fn classify_file(path: &Path, existing: &ExistingFiles) -> Option<FileClassifica
     let path_str = path.to_string_lossy().to_string();
     let meta = fs::metadata(path).ok()?;
     let size = meta.len();
-    let mtime = meta.modified().ok()?.duration_since(UNIX_EPOCH).ok()?.as_micros() as i64;
+    let mtime = meta
+        .modified()
+        .ok()?
+        .duration_since(UNIX_EPOCH)
+        .ok()?
+        .as_micros() as i64;
 
     if let Some((_, _, existing_size, existing_mtime)) = existing.by_path.get(&path_str) {
         if size == *existing_size && mtime == *existing_mtime {
@@ -126,7 +133,7 @@ fn aggregate(classifications: Vec<FileClassification>) -> ScanResults {
         match c {
             FileClassification::Skipped { path } => skipped.push(path),
             FileClassification::Moved { id, path, mtime } => {
-                moved.push(MovedEntry { id, path, mtime })
+                moved.push(MovedEntry { id, path, mtime });
             }
             FileClassification::Modified {
                 id,

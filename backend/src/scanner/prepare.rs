@@ -3,7 +3,10 @@ use std::path::{Path, PathBuf};
 
 use uuid::Uuid;
 
-use super::types::*;
+use super::types::{
+    ScanResults, StagingAlbum, StagingArtist, StagingCredit, StagingData, StagingDeleted,
+    StagingFile, StagingModified, StagingMoved, StagingTrack,
+};
 
 static DISC_FOLDER_PATTERN: &[&str] = &["disc", "cd", "disk"];
 
@@ -24,18 +27,16 @@ fn album_directory(file_path: &Path) -> Option<PathBuf> {
     let dir_name = parent.file_name()?.to_str()?;
 
     if is_disc_folder(dir_name) {
-        parent.parent().map(|p| p.to_path_buf())
+        parent.parent().map(std::path::Path::to_path_buf)
     } else {
         Some(parent.to_path_buf())
     }
 }
 
-pub fn prepare_staging_data(
+fn collect_artists(
     results: &ScanResults,
     existing_artists: &HashMap<String, Uuid>,
-    deleted_ids: Vec<Uuid>,
-) -> StagingData {
-    // --- Artists ---
+) -> (HashMap<String, Uuid>, Vec<StagingArtist>) {
     let mut all_artists: HashMap<String, Uuid> = existing_artists.clone();
     let mut new_artist_records: Vec<StagingArtist> = Vec::new();
 
@@ -51,16 +52,16 @@ pub fn prepare_staging_data(
             }
         }
     }
+    (all_artists, new_artist_records)
+}
 
-    // --- Albums (directory-based grouping) ---
+fn collect_albums(results: &ScanResults) -> (HashMap<(String, PathBuf), Uuid>, Vec<StagingAlbum>) {
     let mut album_map: HashMap<(String, PathBuf), Uuid> = HashMap::new();
     let mut album_years: HashMap<Uuid, Option<u16>> = HashMap::new();
 
     for nf in &results.new_files {
-        let album_title = &nf.metadata.album;
         let album_dir = album_directory(Path::new(&nf.path)).unwrap_or_default();
-        let key = (album_title.clone(), album_dir);
-
+        let key = (nf.metadata.album.clone(), album_dir);
         let album_id = *album_map.entry(key).or_insert_with(Uuid::new_v4);
         album_years.entry(album_id).or_insert(nf.metadata.year);
     }
@@ -74,7 +75,55 @@ pub fn prepare_staging_data(
         })
         .collect();
 
-    // --- Files, Tracks, Credits ---
+    (album_map, staging_albums)
+}
+
+fn collect_changes(
+    results: &ScanResults,
+    deleted_ids: Vec<Uuid>,
+) -> (Vec<StagingMoved>, Vec<StagingModified>, Vec<StagingDeleted>) {
+    let staging_moved: Vec<StagingMoved> = results
+        .moved
+        .iter()
+        .map(|m| StagingMoved {
+            id: m.id,
+            new_path: m.path.clone(),
+            mtime: m.mtime,
+        })
+        .collect();
+
+    let staging_modified: Vec<StagingModified> = results
+        .modified
+        .iter()
+        .map(|m| StagingModified {
+            id: m.id,
+            hash: m.hash,
+            size: m.size,
+            duration: m.duration,
+            mtime: m.mtime,
+        })
+        .collect();
+
+    let deletion_id = Uuid::new_v4();
+    let staging_deleted: Vec<StagingDeleted> = deleted_ids
+        .into_iter()
+        .map(|file_id| StagingDeleted {
+            file_id,
+            deletion_id,
+        })
+        .collect();
+
+    (staging_moved, staging_modified, staging_deleted)
+}
+
+pub fn prepare_staging_data(
+    results: &ScanResults,
+    existing_artists: &HashMap<String, Uuid>,
+    deleted_ids: Vec<Uuid>,
+) -> StagingData {
+    let (all_artists, new_artist_records) = collect_artists(results, existing_artists);
+    let (album_map, staging_albums) = collect_albums(results);
+
     let mut staging_files: Vec<StagingFile> = Vec::new();
     let mut staging_tracks: Vec<StagingTrack> = Vec::new();
     let mut staging_credits: Vec<StagingCredit> = Vec::new();
@@ -119,37 +168,7 @@ pub fn prepare_staging_data(
         }
     }
 
-    // --- Moved, Modified, Deleted ---
-    let staging_moved: Vec<StagingMoved> = results
-        .moved
-        .iter()
-        .map(|m| StagingMoved {
-            id: m.id,
-            new_path: m.path.clone(),
-            mtime: m.mtime,
-        })
-        .collect();
-
-    let staging_modified: Vec<StagingModified> = results
-        .modified
-        .iter()
-        .map(|m| StagingModified {
-            id: m.id,
-            hash: m.hash,
-            size: m.size,
-            duration: m.duration,
-            mtime: m.mtime,
-        })
-        .collect();
-
-    let deletion_id = Uuid::new_v4();
-    let staging_deleted: Vec<StagingDeleted> = deleted_ids
-        .into_iter()
-        .map(|file_id| StagingDeleted {
-            file_id,
-            deletion_id,
-        })
-        .collect();
+    let (staging_moved, staging_modified, staging_deleted) = collect_changes(results, deleted_ids);
 
     StagingData {
         artists: new_artist_records,

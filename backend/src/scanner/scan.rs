@@ -6,10 +6,7 @@ use super::classify;
 use super::prepare;
 use super::staging;
 
-pub fn scan(
-    collection_path: &Path,
-    conn: &Connection,
-) -> Result<(), Box<dyn std::error::Error>> {
+pub fn scan(collection_path: &Path, conn: &Connection) -> Result<(), Box<dyn std::error::Error>> {
     let existing_artists = staging::load_existing_artists(conn)?;
     let existing_files = staging::load_existing_files(conn)?;
 

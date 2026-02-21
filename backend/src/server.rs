@@ -1,13 +1,13 @@
 use std::io::{self, Write};
 use std::sync::{Arc, Mutex};
 
+use arrow_ipc::writer::StreamWriter;
+use axum::Router;
 use axum::body::Body;
 use axum::extract::State;
 use axum::http::{Response, StatusCode};
 use axum::routing::post;
-use axum::Router;
 use bytes::Bytes;
-use arrow_ipc::writer::StreamWriter;
 use duckdb::Connection;
 use tokio::sync::{mpsc, oneshot};
 use tokio_stream::wrappers::ReceiverStream;
@@ -56,10 +56,7 @@ impl Drop for ChannelWriter {
     }
 }
 
-async fn query(
-    State(state): State<Arc<AppState>>,
-    body: String,
-) -> Response<Body> {
+async fn query(State(state): State<Arc<AppState>>, body: String) -> Response<Body> {
     let (tx, rx) = mpsc::channel::<io::Result<Bytes>>(8);
     let (ready_tx, ready_rx) = oneshot::channel::<Result<(), String>>();
 
@@ -87,7 +84,10 @@ async fn query(
 
         // Past this point, errors during streaming simply truncate the
         // response. The client will detect the missing IPC EOS marker.
-        let writer = ChannelWriter { tx, buf: Vec::new() };
+        let writer = ChannelWriter {
+            tx,
+            buf: Vec::new(),
+        };
         let Ok(mut ipc_writer) = StreamWriter::try_new(writer, &schema) else {
             return;
         };

@@ -1,7 +1,7 @@
 use duckdb::Connection;
 use std::path::Path;
 
-static DB_FILE_NAME: &'static str = "collectune.db";
+static DB_FILE_NAME: &str = "collectune.db";
 
 struct Migration {
     version: u32,
@@ -51,7 +51,7 @@ pub fn get_db(collection_path: &Path) -> Result<Connection, Box<dyn std::error::
         .collect::<Vec<_>>();
 
     for migration in pending_migrations {
-        run_migration(&mut conn, &migration)?;
+        run_migration(&mut conn, migration)?;
     }
 
     Ok(conn)

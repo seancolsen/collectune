@@ -25,11 +25,11 @@ fn get_collection_path(path_str: &String) -> Result<&Path, String> {
     let path = Path::new(path_str);
 
     if !path.exists() {
-        return Err(format!("The path '{}' does not exist.", path_str));
+        return Err(format!("The path '{path_str}' does not exist."));
     }
 
     if !path.is_dir() {
-        return Err(format!("The path '{}' is not a directory.", path_str));
+        return Err(format!("The path '{path_str}' is not a directory."));
     }
 
     Ok(path)

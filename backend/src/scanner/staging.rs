@@ -1,6 +1,6 @@
-use std::collections::HashMap;
-use duckdb::params;
 use duckdb::Connection;
+use duckdb::params;
+use std::collections::HashMap;
 use uuid::Uuid;
 
 use super::types::{ExistingFiles, StagingData};
@@ -32,7 +32,7 @@ pub fn load_existing_files(conn: &Connection) -> Result<ExistingFiles, duckdb::E
         let hash_blob: Vec<u8> = row.get(2)?;
         let size: u32 = row.get(3)?;
         let mtime: i64 = row.get(4)?;
-        Ok((id_str, path, hash_blob, size as u64, mtime))
+        Ok((id_str, path, hash_blob, u64::from(size), mtime))
     })?;
 
     let mut by_path = HashMap::new();

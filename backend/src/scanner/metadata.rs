@@ -26,9 +26,7 @@ pub fn extension_to_format(ext: &str) -> Option<&'static str> {
 
 fn parse_tag_value_into_u8(value: &Value) -> Option<u8> {
     match value {
-        Value::Binary(_) => None,
-        Value::Boolean(_) => None,
-        Value::Flag => None,
+        Value::Binary(_) | Value::Boolean(_) | Value::Flag => None,
         Value::Float(v) => u8::try_from(*v as i64).ok(),
         Value::SignedInt(v) => u8::try_from(*v).ok(),
         Value::UnsignedInt(v) => u8::try_from(*v).ok(),
@@ -46,9 +44,7 @@ fn parse_tag_value_into_year(value: &Value) -> Option<u16> {
     let current_year = jiff::Zoned::now().year() as u16;
 
     let year = match value {
-        Value::Binary(_) => None,
-        Value::Boolean(_) => None,
-        Value::Flag => None,
+        Value::Binary(_) | Value::Boolean(_) | Value::Flag => None,
         Value::Float(v) => u16::try_from(*v as i64).ok(),
         Value::SignedInt(v) => u16::try_from(*v).ok(),
         Value::UnsignedInt(v) => u16::try_from(*v).ok(),
@@ -89,17 +85,17 @@ fn assemble_tags_into_metadata<'a, T: IntoIterator<Item = &'a Tag>>(tags: T) -> 
             StandardTagKey::Genre => append_string_value(&tag.value, &mut genre_values),
 
             StandardTagKey::Date => {
-                date_value = date_value.or_else(|| parse_tag_value_into_year(&tag.value))
+                date_value = date_value.or_else(|| parse_tag_value_into_year(&tag.value));
             }
             StandardTagKey::TrackNumber => {
                 track_number_value =
-                    track_number_value.or_else(|| parse_tag_value_into_u8(&tag.value))
+                    track_number_value.or_else(|| parse_tag_value_into_u8(&tag.value));
             }
             StandardTagKey::DiscNumber => {
                 disk_number_value =
-                    disk_number_value.or_else(|| parse_tag_value_into_u8(&tag.value))
+                    disk_number_value.or_else(|| parse_tag_value_into_u8(&tag.value));
             }
-            _ => continue,
+            _ => {}
         }
     }
     TrackMetadata {
@@ -118,15 +114,18 @@ fn assemble_tags_into_metadata<'a, T: IntoIterator<Item = &'a Tag>>(tags: T) -> 
 
 fn probe_file(file_path: &Path) -> Option<(ProbeResult, f64)> {
     let file = std::fs::File::open(file_path).ok()?;
-    let mss = MediaSourceStream::new(Box::new(file), Default::default());
+    let mss = MediaSourceStream::new(
+        Box::new(file),
+        symphonia::core::io::MediaSourceStreamOptions::default(),
+    );
 
     let mut hint = Hint::new();
     if let Some(ext_str) = file_path.extension().and_then(|e| e.to_str()) {
         hint.with_extension(ext_str);
     }
 
-    let meta_opts: MetadataOptions = Default::default();
-    let fmt_opts: FormatOptions = Default::default();
+    let meta_opts = MetadataOptions::default();
+    let fmt_opts = FormatOptions::default();
 
     let probed = symphonia::default::get_probe()
         .format(&hint, mss, &fmt_opts, &meta_opts)
@@ -146,14 +145,16 @@ fn probe_file(file_path: &Path) -> Option<(ProbeResult, f64)> {
 /// Analyze a file to get its duration in seconds. Returns 0.0 if undetermined.
 pub fn get_duration(file_path: &Path) -> f64 {
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        probe_file(file_path).map(|(_, d)| d).unwrap_or(0.0)
+        probe_file(file_path).map_or(0.0, |(_, d)| d)
     }));
-    match result {
-        Ok(d) => d,
-        Err(_) => {
-            eprintln!("Warning: panic while probing {:?}, skipping duration", file_path);
-            0.0
-        }
+    if let Ok(d) = result {
+        d
+    } else {
+        eprintln!(
+            "Warning: panic while probing {}, skipping duration",
+            file_path.display()
+        );
+        0.0
     }
 }
 
@@ -176,7 +177,7 @@ pub fn get_track_metadata(file_path: &Path) -> Option<(TrackMetadata, f64)> {
         let probed_tags = probed_meta
             .as_ref()
             .and_then(|m| m.current())
-            .map(|r| r.tags())
+            .map(symphonia::core::meta::MetadataRevision::tags)
             .unwrap_or_default()
             .iter();
 
@@ -184,7 +185,7 @@ pub fn get_track_metadata(file_path: &Path) -> Option<(TrackMetadata, f64)> {
         let format_meta = probed.format.metadata();
         let format_tags = format_meta
             .current()
-            .map(|r| r.tags())
+            .map(symphonia::core::meta::MetadataRevision::tags)
             .unwrap_or_default()
             .iter();
 
@@ -193,11 +194,13 @@ pub fn get_track_metadata(file_path: &Path) -> Option<(TrackMetadata, f64)> {
         Some((metadata, duration))
     }));
 
-    match result {
-        Ok(inner) => inner,
-        Err(_) => {
-            eprintln!("Warning: panic while reading {:?}, skipping", file_path);
-            None
-        }
+    if let Ok(inner) = result {
+        inner
+    } else {
+        eprintln!(
+            "Warning: panic while reading {}, skipping",
+            file_path.display()
+        );
+        None
     }
 }

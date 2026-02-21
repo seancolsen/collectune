@@ -3,6 +3,9 @@ name = "collectune"
 version = "0.1.0"
 edition = "2024"
 
+[lints]
+workspace = true
+
 [dependencies]
 arrow-ipc = "56"
 axum = "0.8"
