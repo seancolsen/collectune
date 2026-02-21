@@ -2,15 +2,28 @@ use std::sync::{Arc, Mutex};
 
 use arrow_cast::display::{ArrayFormatter, FormatOptions};
 use arrow_ipc::reader::StreamReader;
+use clap::Parser;
 use eframe::egui;
 
+#[derive(Parser)]
+struct Cli {
+    /// UI scale factor (e.g. 1.5, 2)
+    #[arg(long, short)]
+    scale: Option<f32>,
+}
+
 fn main() -> eframe::Result {
+    let cli = Cli::parse();
+
     let options = eframe::NativeOptions::default();
     eframe::run_native(
         "Collectune",
         options,
-        Box::new(|cc| {
+        Box::new(move |cc| {
             cc.egui_ctx.set_visuals(egui::Visuals::light());
+            if let Some(s) = cli.scale {
+                cc.egui_ctx.set_pixels_per_point(s);
+            }
             Ok(Box::new(App::default()))
         }),
     )
