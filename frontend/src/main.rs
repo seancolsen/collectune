@@ -128,18 +128,6 @@ fn execute_query(
 
     let reader = StreamReader::try_new(resp.into_reader(), None).map_err(|e| e.to_string())?;
 
-    let schema = reader.schema();
-    {
-        let header: String = schema
-            .fields()
-            .iter()
-            .map(|f| f.name().as_str())
-            .collect::<Vec<_>>()
-            .join(" ");
-        let mut s = state.lock().unwrap();
-        s.result_text.push_str(&header);
-        s.result_text.push('\n');
-    }
     ctx.request_repaint();
 
     let fmt_opts = FormatOptions::default();
