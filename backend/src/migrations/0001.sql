@@ -35,8 +35,7 @@ create table file (
   duration real not null,
   mtime bigint not null, -- filesystem mtime as microseconds since epoch
   added timestamp not null,
-  deletion uuid,
-  foreign key (deletion) references deletion(id)
+  deletion uuid
 );
 
 create table artist (
@@ -60,9 +59,7 @@ create table track (
   disc_number utinyint,
   track_number utinyint,
   genre text,
-  rating real,
-  foreign key (file) references file(id),
-  foreign key (album) references album(id)
+  rating real
 );
 
 create table credit (
@@ -70,8 +67,6 @@ create table credit (
   artist uuid not null,
   ord real,
   role text,
-  foreign key (track) references track(id),
-  foreign key (artist) references artist(id),
   primary key (track, artist)
 );
 
