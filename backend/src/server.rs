@@ -6,15 +6,15 @@ use axum::Router;
 use axum::body::Body;
 use axum::extract::State;
 use axum::http::{Response, StatusCode};
-use axum::routing::post;
+use axum::routing::{get, post};
 use bytes::Bytes;
 use duckdb::Connection;
 use tokio::sync::{mpsc, oneshot};
 use tokio_stream::wrappers::ReceiverStream;
 use tower_http::cors::CorsLayer;
 
-struct AppState {
-    db: Mutex<Connection>,
+pub(crate) struct AppState {
+    pub(crate) db: Mutex<Connection>,
 }
 
 /// Bridges synchronous Arrow IPC writes to an async byte stream.
@@ -126,6 +126,7 @@ pub async fn serve(conn: Connection, port: u16) -> Result<(), Box<dyn std::error
 
     let app = Router::new()
         .route("/query", post(query))
+        .route("/tracks/{id}/stream", get(crate::stream::stream_track))
         .layer(CorsLayer::permissive())
         .with_state(state);
 

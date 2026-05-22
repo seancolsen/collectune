@@ -82,8 +82,7 @@ impl eframe::App for App {
                 let mut text = state.result_text.as_str();
                 ui.add_sized(
                     available,
-                    egui::TextEdit::multiline(&mut text)
-                        .font(egui::TextStyle::Monospace),
+                    egui::TextEdit::multiline(&mut text).font(egui::TextStyle::Monospace),
                 );
             }
         });
@@ -127,8 +126,7 @@ fn execute_query(
             other => other.to_string(),
         })?;
 
-    let reader =
-        StreamReader::try_new(resp.into_reader(), None).map_err(|e| e.to_string())?;
+    let reader = StreamReader::try_new(resp.into_reader(), None).map_err(|e| e.to_string())?;
 
     let schema = reader.schema();
     {

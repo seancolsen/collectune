@@ -4,6 +4,7 @@ use std::path::Path;
 mod db;
 mod scanner;
 mod server;
+mod stream;
 
 #[derive(Parser)]
 #[command(name = "collectune")]
