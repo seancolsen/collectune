@@ -87,15 +87,18 @@ impl eframe::App for App {
                 let rows = &state.rows;
                 let selection = &self.selection;
                 let row_height = ui.text_style_height(&egui::TextStyle::Monospace);
+                let padding = 6.0;
+                let row_height_padded = row_height + padding * 2.0;
                 egui::ScrollArea::vertical()
                     .auto_shrink([false, false])
-                    .show_rows(ui, row_height, rows.len(), |ui, range| {
+                    .show_rows(ui, row_height_padded, rows.len(), |ui, range| {
+                        ui.spacing_mut().item_spacing.y = 0.0;
                         for index in range {
                             let resp = row_widget(
                                 ui,
                                 &rows[index],
                                 selection.contains(&index),
-                                row_height,
+                                row_height_padded,
                             );
                             if resp.clicked() {
                                 let mods = ui.input(|i| i.modifiers);
@@ -119,16 +122,31 @@ fn row_widget(ui: &mut egui::Ui, text: &str, selected: bool, height: f32) -> egu
 
     let visuals = ui.visuals();
     let bg = if selected {
-        Some(visuals.selection.bg_fill)
+        let base = visuals.selection.bg_fill;
+        if response.hovered() {
+            egui::Color32::from_rgba_unmultiplied(
+                base.r().saturating_sub(20),
+                base.g().saturating_sub(20),
+                base.b().saturating_sub(20),
+                base.a(),
+            )
+        } else {
+            base
+        }
     } else if response.hovered() {
-        Some(visuals.widgets.hovered.weak_bg_fill)
+        visuals.widgets.hovered.weak_bg_fill
     } else {
-        None
+        visuals.extreme_bg_color
     };
 
-    if let Some(color) = bg {
-        ui.painter().rect_filled(rect, 0.0, color);
-    }
+    ui.painter().rect_filled(rect, 0.0, bg);
+
+    // thin separator line at the bottom of the row
+    let sep_color = visuals.widgets.noninteractive.bg_stroke.color;
+    ui.painter().line_segment(
+        [rect.left_bottom(), rect.right_bottom()],
+        egui::Stroke::new(1.0, sep_color),
+    );
 
     let font_id = egui::TextStyle::Monospace.resolve(ui.style());
     ui.painter().text(
