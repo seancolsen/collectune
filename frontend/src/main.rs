@@ -25,6 +25,9 @@ fn main() -> eframe::Result {
             if let Some(s) = cli.scale {
                 cc.egui_ctx.set_pixels_per_point(s);
             }
+            let mut fonts = egui::FontDefinitions::default();
+            egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Bold);
+            cc.egui_ctx.set_fonts(fonts);
             Ok(Box::new(App::default()))
         }),
     )
@@ -57,6 +60,27 @@ impl Default for App {
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        let panel_fill = ctx.style().visuals.panel_fill;
+        egui::TopBottomPanel::top("menu_bar")
+            .exact_height(30.0)
+            .show_separator_line(false)
+            .frame(
+                egui::Frame::new()
+                    .fill(panel_fill)
+                    .inner_margin(egui::Margin::same(0)),
+            )
+            .show(ctx, |ui| {
+                ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                    ui.add_space(8.0);
+                    ui.add(
+                        egui::Button::new(
+                            egui::RichText::new(egui_phosphor::bold::LIST).size(18.0),
+                        )
+                        .frame(false),
+                    );
+                });
+            });
+
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.add(
                 egui::TextEdit::multiline(&mut self.query_text)
