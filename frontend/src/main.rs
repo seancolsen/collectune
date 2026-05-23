@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 
 use arrow_cast::display::{ArrayFormatter, FormatOptions};
@@ -31,7 +32,7 @@ fn main() -> eframe::Result {
 
 #[derive(Default)]
 struct QueryState {
-    result_text: String,
+    rows: Vec<String>,
     error: Option<String>,
     running: bool,
 }
@@ -39,6 +40,8 @@ struct QueryState {
 struct App {
     query_text: String,
     state: Arc<Mutex<QueryState>>,
+    selection: HashSet<usize>,
+    selection_anchor: Option<usize>,
 }
 
 impl Default for App {
@@ -46,6 +49,8 @@ impl Default for App {
         Self {
             query_text: String::new(),
             state: Arc::new(Mutex::new(QueryState::default())),
+            selection: HashSet::new(),
+            selection_anchor: None,
         }
     }
 }
@@ -77,27 +82,102 @@ impl eframe::App for App {
                 ui.colored_label(egui::Color32::RED, err);
             }
 
-            if !state.result_text.is_empty() {
-                let available = ui.available_size();
-                let mut text = state.result_text.as_str();
-                ui.add_sized(
-                    available,
-                    egui::TextEdit::multiline(&mut text).font(egui::TextStyle::Monospace),
-                );
+            let mut clicked: Option<(usize, egui::Modifiers)> = None;
+            if !state.rows.is_empty() {
+                let rows = &state.rows;
+                let selection = &self.selection;
+                let row_height = ui.text_style_height(&egui::TextStyle::Monospace);
+                egui::ScrollArea::vertical()
+                    .auto_shrink([false, false])
+                    .show_rows(ui, row_height, rows.len(), |ui, range| {
+                        for index in range {
+                            let resp = row_widget(
+                                ui,
+                                &rows[index],
+                                selection.contains(&index),
+                                row_height,
+                            );
+                            if resp.clicked() {
+                                let mods = ui.input(|i| i.modifiers);
+                                clicked = Some((index, mods));
+                            }
+                        }
+                    });
+            }
+            drop(state);
+
+            if let Some((index, mods)) = clicked {
+                self.handle_row_click(index, mods);
             }
         });
     }
 }
 
+fn row_widget(ui: &mut egui::Ui, text: &str, selected: bool, height: f32) -> egui::Response {
+    let desired = egui::vec2(ui.available_width(), height);
+    let (rect, response) = ui.allocate_exact_size(desired, egui::Sense::click());
+
+    let visuals = ui.visuals();
+    let bg = if selected {
+        Some(visuals.selection.bg_fill)
+    } else if response.hovered() {
+        Some(visuals.widgets.hovered.weak_bg_fill)
+    } else {
+        None
+    };
+
+    if let Some(color) = bg {
+        ui.painter().rect_filled(rect, 0.0, color);
+    }
+
+    let font_id = egui::TextStyle::Monospace.resolve(ui.style());
+    ui.painter().text(
+        rect.left_center(),
+        egui::Align2::LEFT_CENTER,
+        text,
+        font_id,
+        visuals.text_color(),
+    );
+
+    response
+}
+
 impl App {
-    fn run_query(&self, ctx: &egui::Context) {
+    fn handle_row_click(&mut self, index: usize, modifiers: egui::Modifiers) {
+        if modifiers.shift {
+            let anchor = self.selection_anchor.unwrap_or(index);
+            let (lo, hi) = if anchor <= index {
+                (anchor, index)
+            } else {
+                (index, anchor)
+            };
+            self.selection.clear();
+            for i in lo..=hi {
+                self.selection.insert(i);
+            }
+        } else if modifiers.command || modifiers.ctrl {
+            if !self.selection.remove(&index) {
+                self.selection.insert(index);
+            }
+            self.selection_anchor = Some(index);
+        } else {
+            self.selection.clear();
+            self.selection.insert(index);
+            self.selection_anchor = Some(index);
+        }
+    }
+
+    fn run_query(&mut self, ctx: &egui::Context) {
         let query = self.query_text.clone();
         let state = Arc::clone(&self.state);
         let ctx = ctx.clone();
 
+        self.selection.clear();
+        self.selection_anchor = None;
+
         {
             let mut s = state.lock().unwrap();
-            s.result_text.clear();
+            s.rows.clear();
             s.error = None;
             s.running = true;
         }
@@ -142,13 +222,14 @@ fn execute_query(
 
         let mut s = state.lock().unwrap();
         for row in 0..batch.num_rows() {
+            let mut line = String::new();
             for (i, fmt) in formatters.iter().enumerate() {
                 if i > 0 {
-                    s.result_text.push(' ');
+                    line.push(' ');
                 }
-                s.result_text.push_str(&fmt.value(row).to_string());
+                line.push_str(&fmt.value(row).to_string());
             }
-            s.result_text.push('\n');
+            s.rows.push(line);
         }
         drop(s);
         ctx.request_repaint();
