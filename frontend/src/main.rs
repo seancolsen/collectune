@@ -92,6 +92,7 @@ impl Default for App {
 }
 
 impl eframe::App for App {
+    #[allow(clippy::too_many_lines)]
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         let panel_fill = ctx.style().visuals.panel_fill;
 
@@ -102,11 +103,8 @@ impl eframe::App for App {
         } else {
             (0.0, ORGANIZER_ANIM_TIME)
         };
-        let progress = ctx.animate_value_with_time(
-            egui::Id::new("organizer_anim"),
-            anim_target,
-            anim_time,
-        );
+        let progress =
+            ctx.animate_value_with_time(egui::Id::new("organizer_anim"), anim_target, anim_time);
         let organizer_offset = progress * ORGANIZER_WIDTH;
 
         egui::TopBottomPanel::top("menu_bar")
@@ -135,21 +133,14 @@ impl eframe::App for App {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.add_space(8.0);
                         // Gear button — rightmost, manually painted for custom active style.
-                        let gear_font = egui::FontId::new(
-                            18.0,
-                            egui::FontFamily::Name("phosphor-fill".into()),
-                        );
-                        let (gear_rect, gear_resp) = ui.allocate_exact_size(
-                            egui::vec2(26.0, 26.0),
-                            egui::Sense::click(),
-                        );
+                        let gear_font =
+                            egui::FontId::new(18.0, egui::FontFamily::Name("phosphor-fill".into()));
+                        let (gear_rect, gear_resp) =
+                            ui.allocate_exact_size(egui::vec2(26.0, 26.0), egui::Sense::click());
                         if ui.is_rect_visible(gear_rect) {
                             if self.config_open {
-                                ui.painter().rect_filled(
-                                    gear_rect,
-                                    4.0,
-                                    ui.visuals().text_color(),
-                                );
+                                ui.painter()
+                                    .rect_filled(gear_rect, 4.0, ui.visuals().text_color());
                             } else if gear_resp.hovered() {
                                 ui.painter().rect_filled(
                                     gear_rect,
@@ -209,8 +200,7 @@ impl eframe::App for App {
                         let running = self.state.lock().unwrap().running;
                         if !running
                             && text_edit_resp.has_focus()
-                            && ui
-                                .input(|i| i.key_pressed(egui::Key::Enter) && i.modifiers.ctrl)
+                            && ui.input(|i| i.key_pressed(egui::Key::Enter) && i.modifiers.ctrl)
                         {
                             self.run_query(ctx);
                         }
@@ -401,9 +391,8 @@ impl App {
         if resp.dragged() {
             self.organizer_drag_dx += resp.drag_delta().x;
             let effective = static_friction(self.organizer_drag_dx, ORGANIZER_DRAG_FRICTION);
-            self.organizer_dragged_progress = (self.organizer_drag_start_progress
-                + effective / ORGANIZER_WIDTH)
-                .clamp(0.0, 1.0);
+            self.organizer_dragged_progress =
+                (self.organizer_drag_start_progress + effective / ORGANIZER_WIDTH).clamp(0.0, 1.0);
         }
         if resp.drag_stopped() {
             self.organizer_dragging = false;
@@ -478,7 +467,7 @@ fn execute_query(
         .send_string(query)
         .map_err(|e| match e {
             ureq::Error::Status(_, resp) => resp.into_string().unwrap_or_else(|e| e.to_string()),
-            other => other.to_string(),
+            other @ ureq::Error::Transport(_) => other.to_string(),
         })?;
 
     let reader = StreamReader::try_new(resp.into_reader(), None).map_err(|e| e.to_string())?;
