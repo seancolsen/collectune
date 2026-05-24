@@ -144,12 +144,19 @@ impl eframe::App for App {
             });
 
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.add(
+            let text_edit_resp = ui.add(
                 egui::TextEdit::multiline(&mut self.query_text)
                     .desired_width(f32::INFINITY)
                     .desired_rows(6)
                     .font(egui::TextStyle::Monospace),
             );
+            let running = self.state.lock().unwrap().running;
+            if !running
+                && text_edit_resp.has_focus()
+                && ui.input(|i| i.key_pressed(egui::Key::Enter) && i.modifiers.ctrl)
+            {
+                self.run_query(ctx);
+            }
 
             let state = self.state.lock().unwrap();
 
