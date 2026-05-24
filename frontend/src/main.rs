@@ -39,6 +39,15 @@ fn main() -> eframe::Result {
             }
             let mut fonts = egui::FontDefinitions::default();
             egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Bold);
+            // Load fill as a separate named family so it doesn't overwrite bold's "phosphor" key.
+            fonts.font_data.insert(
+                "phosphor-fill".into(),
+                egui_phosphor::Variant::Fill.font_data().into(),
+            );
+            fonts.families.insert(
+                egui::FontFamily::Name("phosphor-fill".into()),
+                vec!["phosphor-fill".into()],
+            );
             cc.egui_ctx.set_fonts(fonts);
             Ok(Box::new(App::default()))
         }),
@@ -62,6 +71,7 @@ struct App {
     organizer_drag_dx: f32,
     organizer_drag_start_progress: f32,
     organizer_dragged_progress: f32,
+    config_open: bool,
 }
 
 impl Default for App {
@@ -76,6 +86,7 @@ impl Default for App {
             organizer_drag_dx: 0.0,
             organizer_drag_start_progress: 0.0,
             organizer_dragged_progress: 0.0,
+            config_open: false,
         }
     }
 }
@@ -123,6 +134,46 @@ impl eframe::App for App {
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.add_space(8.0);
+                        // Gear button — rightmost, manually painted for custom active style.
+                        let gear_font = egui::FontId::new(
+                            18.0,
+                            egui::FontFamily::Name("phosphor-fill".into()),
+                        );
+                        let (gear_rect, gear_resp) = ui.allocate_exact_size(
+                            egui::vec2(26.0, 26.0),
+                            egui::Sense::click(),
+                        );
+                        if ui.is_rect_visible(gear_rect) {
+                            if self.config_open {
+                                ui.painter().rect_filled(
+                                    gear_rect,
+                                    4.0,
+                                    ui.visuals().text_color(),
+                                );
+                            } else if gear_resp.hovered() {
+                                ui.painter().rect_filled(
+                                    gear_rect,
+                                    4.0,
+                                    ui.visuals().widgets.hovered.weak_bg_fill,
+                                );
+                            }
+                            let icon_color = if self.config_open {
+                                egui::Color32::WHITE
+                            } else {
+                                ui.visuals().text_color()
+                            };
+                            ui.painter().text(
+                                gear_rect.center(),
+                                egui::Align2::CENTER_CENTER,
+                                egui_phosphor::fill::GEAR_SIX,
+                                gear_font,
+                                icon_color,
+                            );
+                        }
+                        if gear_resp.clicked() {
+                            self.config_open = !self.config_open;
+                        }
+                        // Run button — to the left of gear.
                         if ui
                             .add_enabled(
                                 !running,
@@ -143,21 +194,31 @@ impl eframe::App for App {
                 });
             });
 
-        egui::CentralPanel::default().show(ctx, |ui| {
-            let text_edit_resp = ui.add(
-                egui::TextEdit::multiline(&mut self.query_text)
-                    .desired_width(f32::INFINITY)
-                    .desired_rows(6)
-                    .font(egui::TextStyle::Monospace),
-            );
-            let running = self.state.lock().unwrap().running;
-            if !running
-                && text_edit_resp.has_focus()
-                && ui.input(|i| i.key_pressed(egui::Key::Enter) && i.modifiers.ctrl)
-            {
-                self.run_query(ctx);
-            }
+        if self.config_open {
+            let config_height = ctx.available_rect().height() * 0.3;
+            egui::TopBottomPanel::top("config")
+                .exact_height(config_height)
+                .show(ctx, |ui| {
+                    egui::ScrollArea::vertical().show(ui, |ui| {
+                        let text_edit_resp = ui.add(
+                            egui::TextEdit::multiline(&mut self.query_text)
+                                .desired_width(f32::INFINITY)
+                                .desired_rows(6)
+                                .font(egui::TextStyle::Monospace),
+                        );
+                        let running = self.state.lock().unwrap().running;
+                        if !running
+                            && text_edit_resp.has_focus()
+                            && ui
+                                .input(|i| i.key_pressed(egui::Key::Enter) && i.modifiers.ctrl)
+                        {
+                            self.run_query(ctx);
+                        }
+                    });
+                });
+        }
 
+        egui::CentralPanel::default().show(ctx, |ui| {
             let state = self.state.lock().unwrap();
 
             if let Some(err) = &state.error {
