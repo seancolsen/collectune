@@ -107,6 +107,7 @@ impl eframe::App for App {
                     .inner_margin(egui::Margin::same(0)),
             )
             .show(ctx, |ui| {
+                let running = self.state.lock().unwrap().running;
                 ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
                     ui.add_space(8.0);
                     if ui
@@ -120,6 +121,25 @@ impl eframe::App for App {
                     {
                         self.organizer_open = !self.organizer_open;
                     }
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.add_space(8.0);
+                        if ui
+                            .add_enabled(
+                                !running,
+                                egui::Button::new(
+                                    egui::RichText::new(egui_phosphor::bold::ARROWS_CLOCKWISE)
+                                        .size(18.0),
+                                )
+                                .frame(false),
+                            )
+                            .clicked()
+                        {
+                            self.run_query(ctx);
+                        }
+                        if running {
+                            ui.spinner();
+                        }
+                    });
                 });
             });
 
@@ -130,17 +150,6 @@ impl eframe::App for App {
                     .desired_rows(6)
                     .font(egui::TextStyle::Monospace),
             );
-
-            let running = self.state.lock().unwrap().running;
-
-            ui.horizontal(|ui| {
-                if ui.add_enabled(!running, egui::Button::new("Run")).clicked() {
-                    self.run_query(ctx);
-                }
-                if running {
-                    ui.spinner();
-                }
-            });
 
             let state = self.state.lock().unwrap();
 
