@@ -32,7 +32,7 @@ const OPUS_FRAME_SAMPLES: usize = 960; // 20ms at 48kHz
 const RESAMPLE_CHUNK_SIZE: usize = 1024;
 
 #[derive(Deserialize)]
-pub(crate) struct StreamParams {
+pub struct StreamParams {
     #[serde(default = "default_quality")]
     quality: String,
     #[serde(default)]

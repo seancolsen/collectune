@@ -1,13 +1,9 @@
+use backend::{db, scanner, server};
 use clap::Parser;
 use std::path::Path;
 
-mod db;
-mod scanner;
-mod server;
-mod stream;
-
 #[derive(Parser)]
-#[command(name = "collectune")]
+#[command(name = "collectune-server")]
 #[command(about = "A tool for managing audio file collections")]
 struct Args {
     /// Path to the collection of audio files

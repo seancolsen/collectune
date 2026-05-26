@@ -13,8 +13,22 @@ use tokio::sync::{mpsc, oneshot};
 use tokio_stream::wrappers::ReceiverStream;
 use tower_http::cors::CorsLayer;
 
-pub(crate) struct AppState {
-    pub(crate) db: Mutex<Connection>,
+pub struct AppState {
+    pub db: Mutex<Connection>,
+}
+
+pub fn app_state(conn: Connection) -> Arc<AppState> {
+    Arc::new(AppState {
+        db: Mutex::new(conn),
+    })
+}
+
+pub fn router(state: Arc<AppState>) -> Router {
+    Router::new()
+        .route("/query", post(query))
+        .route("/tracks/{id}/stream", get(crate::stream::stream_track))
+        .layer(CorsLayer::permissive())
+        .with_state(state)
 }
 
 /// Bridges synchronous Arrow IPC writes to an async byte stream.
@@ -120,16 +134,7 @@ async fn query(State(state): State<Arc<AppState>>, body: String) -> Response<Bod
 }
 
 pub async fn serve(conn: Connection, port: u16) -> Result<(), Box<dyn std::error::Error>> {
-    let state = Arc::new(AppState {
-        db: Mutex::new(conn),
-    });
-
-    let app = Router::new()
-        .route("/query", post(query))
-        .route("/tracks/{id}/stream", get(crate::stream::stream_track))
-        .layer(CorsLayer::permissive())
-        .with_state(state);
-
+    let app = router(app_state(conn));
     let addr = format!("0.0.0.0:{port}");
     println!("Listening on {addr}");
     let listener = tokio::net::TcpListener::bind(&addr).await?;

@@ -1,0 +1,15 @@
+[package]
+name = "collectune"
+version = "0.1.0"
+edition = "2024"
+
+[lints]
+workspace = true
+
+[dependencies]
+backend = { path = "../backend" }
+axum = "0.8"
+clap = { version = "4.5", features = ["derive"] }
+mime_guess = "2"
+rust-embed = "8"
+tokio = { version = "1", features = ["full"] }
