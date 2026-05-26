@@ -70,3 +70,9 @@ create table credit (
   primary key (track, artist)
 );
 
+create table play (
+  track uuid not null,
+  timestamp timestamp_s not null,
+  primary key (track, timestamp)
+);
+
