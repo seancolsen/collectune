@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::PathBuf;
 use uuid::Uuid;
 
 #[derive(Debug)]
@@ -35,6 +36,7 @@ pub enum FileClassification {
     Modified {
         id: Uuid,
         path: String,
+        real_path: PathBuf,
         hash: [u8; 32],
         size: u64,
         duration: f64,
@@ -62,6 +64,7 @@ pub struct MovedEntry {
 pub struct ModifiedEntry {
     pub id: Uuid,
     pub path: String,
+    pub real_path: PathBuf,
     pub hash: [u8; 32],
     pub size: u64,
     pub duration: f64,

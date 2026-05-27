@@ -36,13 +36,24 @@ pub fn get_audio_files(dir: &Path) -> Vec<PathBuf> {
     files
 }
 
+/// Returns a normalized path string relative to `collection_root`, prefixed with `./`.
+/// Falls back to the original path string if canonicalization fails.
+fn normalize_path(path: &Path, canonical_root: &Path) -> String {
+    let canonical = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let relative = canonical
+        .strip_prefix(canonical_root)
+        .map(|rel| format!("./{}", rel.display()))
+        .unwrap_or_else(|_| path.to_string_lossy().to_string());
+    relative
+}
+
 fn hash_file(path: &Path) -> Option<[u8; 32]> {
     let data = fs::read(path).ok()?;
     Some(*blake3::hash(&data).as_bytes())
 }
 
-fn classify_file(path: &Path, existing: &ExistingFiles) -> Option<FileClassification> {
-    let path_str = path.to_string_lossy().to_string();
+fn classify_file(path: &Path, existing: &ExistingFiles, canonical_root: &Path) -> Option<FileClassification> {
+    let path_str = normalize_path(path, canonical_root);
     let meta = fs::metadata(path).ok()?;
     let size = meta.len();
     let mtime = meta
@@ -68,6 +79,7 @@ fn classify_file(path: &Path, existing: &ExistingFiles) -> Option<FileClassifica
             return Some(FileClassification::Modified {
                 id: *id,
                 path: path_str,
+                real_path: path.to_path_buf(),
                 hash,
                 size,
                 duration,
@@ -79,6 +91,7 @@ fn classify_file(path: &Path, existing: &ExistingFiles) -> Option<FileClassifica
         return Some(FileClassification::Modified {
             id: *id,
             path: path_str,
+            real_path: path.to_path_buf(),
             hash,
             size,
             duration,
@@ -101,16 +114,15 @@ fn classify_file(path: &Path, existing: &ExistingFiles) -> Option<FileClassifica
         }
     }
 
-    classify_as_new(path_str, hash, mtime)
+    classify_as_new(path, path_str, hash, mtime)
 }
 
-fn classify_as_new(path_str: String, hash: [u8; 32], mtime: i64) -> Option<FileClassification> {
-    let path = Path::new(&path_str);
-    let ext = path.extension()?.to_str()?;
+fn classify_as_new(real_path: &Path, path_str: String, hash: [u8; 32], mtime: i64) -> Option<FileClassification> {
+    let ext = real_path.extension()?.to_str()?;
     let format = extension_to_format(ext)?;
 
-    let (metadata, duration) = get_track_metadata(path)?;
-    let size = fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+    let (metadata, duration) = get_track_metadata(real_path)?;
+    let size = fs::metadata(real_path).map(|m| m.len()).unwrap_or(0);
 
     Some(FileClassification::New(NewFileData {
         path: path_str,
@@ -138,6 +150,7 @@ fn aggregate(classifications: Vec<FileClassification>) -> ScanResults {
             FileClassification::Modified {
                 id,
                 path,
+                real_path,
                 hash,
                 size,
                 duration,
@@ -145,6 +158,7 @@ fn aggregate(classifications: Vec<FileClassification>) -> ScanResults {
             } => modified.push(ModifiedEntry {
                 id,
                 path,
+                real_path,
                 hash,
                 size,
                 duration,
@@ -174,7 +188,7 @@ pub fn resolve_conflicts(results: &mut ScanResults) {
 
     for entry in conflicting {
         if let Some(FileClassification::New(data)) =
-            classify_as_new(entry.path, entry.hash, entry.mtime)
+            classify_as_new(&entry.real_path, entry.path, entry.hash, entry.mtime)
         {
             results.new_files.push(data);
         }
@@ -208,11 +222,12 @@ pub fn detect_deletions(results: &ScanResults, existing: &ExistingFiles) -> Vec<
 
 /// Discover audio files and classify them in parallel against existing DB state.
 pub fn classify_all(collection_path: &Path, existing: &ExistingFiles) -> ScanResults {
+    let canonical_root = fs::canonicalize(collection_path).unwrap_or_else(|_| collection_path.to_path_buf());
     let audio_files = get_audio_files(collection_path);
 
     let classifications: Vec<FileClassification> = audio_files
         .par_iter()
-        .filter_map(|path| classify_file(path, existing))
+        .filter_map(|path| classify_file(path, existing, &canonical_root))
         .collect();
 
     aggregate(classifications)
