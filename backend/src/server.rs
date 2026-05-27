@@ -1,4 +1,5 @@
 use std::io::{self, Write};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use arrow_ipc::writer::StreamWriter;
@@ -15,11 +16,14 @@ use tower_http::cors::CorsLayer;
 
 pub struct AppState {
     pub db: Mutex<Connection>,
+    pub collection_path: PathBuf,
 }
 
-pub fn app_state(conn: Connection) -> Arc<AppState> {
+pub fn app_state(conn: Connection, collection_path: PathBuf) -> Arc<AppState> {
+    let collection_path = std::fs::canonicalize(&collection_path).unwrap_or(collection_path);
     Arc::new(AppState {
         db: Mutex::new(conn),
+        collection_path,
     })
 }
 
@@ -133,8 +137,12 @@ async fn query(State(state): State<Arc<AppState>>, body: String) -> Response<Bod
     }
 }
 
-pub async fn serve(conn: Connection, port: u16) -> Result<(), Box<dyn std::error::Error>> {
-    let app = router(app_state(conn));
+pub async fn serve(
+    conn: Connection,
+    collection_path: PathBuf,
+    port: u16,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let app = router(app_state(conn, collection_path));
     let addr = format!("0.0.0.0:{port}");
     println!("Listening on {addr}");
     let listener = tokio::net::TcpListener::bind(&addr).await?;

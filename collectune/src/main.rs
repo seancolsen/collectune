@@ -58,7 +58,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if !args.no_scan {
         scanner::scan(collection_path, &conn)?;
     }
-    let state = server::app_state(conn);
+    let state = server::app_state(conn, collection_path.to_path_buf());
 
     let app = Router::new()
         .nest("/api", server::router(state))

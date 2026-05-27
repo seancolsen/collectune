@@ -1,13 +1,17 @@
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use eframe::egui;
 use eframe::egui::emath::TSTransform;
 
+mod audio;
 mod http;
 mod lineage;
 #[cfg(target_arch = "wasm32")]
 mod web;
+
+use audio::AudioPlayer;
 
 const ORGANIZER_WIDTH: f32 = 200.0;
 const ORGANIZER_ANIM_TIME: f32 = 0.1;
@@ -42,7 +46,19 @@ pub(crate) struct QueryState {
     pub(crate) error: Option<String>,
     pub(crate) running: bool,
     pub(crate) track_id_column: Option<usize>,
+    pub(crate) lineage_done: bool,
+    pub(crate) needs_revalidation: bool,
 }
+
+#[derive(Clone)]
+pub(crate) struct CurrentTrack {
+    pub(crate) id: String,
+    pub(crate) row_index: Option<usize>,
+    pub(crate) title: Option<String>,
+    pub(crate) artist_names: Vec<String>,
+}
+
+const ACCENT_BLUE: egui::Color32 = egui::Color32::from_rgb(0x2E, 0x7C, 0xF6);
 
 pub struct App {
     query_text: String,
@@ -55,6 +71,8 @@ pub struct App {
     organizer_drag_start_progress: f32,
     organizer_dragged_progress: f32,
     config_open: bool,
+    current_track: Arc<Mutex<Option<CurrentTrack>>>,
+    audio: Box<dyn AudioPlayer>,
 }
 
 impl Default for App {
@@ -70,6 +88,8 @@ impl Default for App {
             organizer_drag_start_progress: 0.0,
             organizer_dragged_progress: 0.0,
             config_open: false,
+            current_track: Arc::new(Mutex::new(None)),
+            audio: audio::new_player(),
         }
     }
 }
@@ -191,6 +211,9 @@ impl eframe::App for App {
                 });
         }
 
+        self.render_now_playing(ctx);
+        self.maybe_revalidate_current_track_index();
+
         egui::CentralPanel::default().show(ctx, |ui| {
             let state = self.state.lock().unwrap();
 
@@ -199,10 +222,17 @@ impl eframe::App for App {
             }
 
             let mut clicked: Option<(usize, egui::Modifiers)> = None;
+            let mut double_clicked: Option<(usize, String)> = None;
             if !state.rows.is_empty() {
                 let rows = &state.rows;
                 let selection = &self.selection;
                 let track_id_column = state.track_id_column;
+                let current_row = self
+                    .current_track
+                    .lock()
+                    .unwrap()
+                    .as_ref()
+                    .and_then(|c| c.row_index);
                 let row_height = ui.text_style_height(&egui::TextStyle::Monospace);
                 let padding = 6.0;
                 let sub_line_height = if track_id_column.is_some() {
@@ -220,14 +250,20 @@ impl eframe::App for App {
                             let main_text = cells.join(" ");
                             let track_id =
                                 track_id_column.and_then(|i| cells.get(i).map(String::as_str));
+                            let is_current = current_row == Some(index);
                             let resp = row_widget(
                                 ui,
                                 &main_text,
                                 track_id,
                                 selection.contains(&index),
+                                is_current,
                                 row_height_padded,
                             );
-                            if resp.clicked() {
+                            if resp.double_clicked() {
+                                if let Some(id) = track_id {
+                                    double_clicked = Some((index, id.to_string()));
+                                }
+                            } else if resp.clicked() {
                                 let mods = ui.input(|i| i.modifiers);
                                 clicked = Some((index, mods));
                             }
@@ -238,6 +274,9 @@ impl eframe::App for App {
 
             if let Some((index, mods)) = clicked {
                 self.handle_row_click(index, mods);
+            }
+            if let Some((index, id)) = double_clicked {
+                self.play_track(index, id, ctx);
             }
         });
 
@@ -330,13 +369,14 @@ fn row_widget(
     text: &str,
     track_id: Option<&str>,
     selected: bool,
+    is_current: bool,
     height: f32,
 ) -> egui::Response {
     let desired = egui::vec2(ui.available_width(), height);
     let (rect, response) = ui.allocate_exact_size(desired, egui::Sense::click());
 
     let visuals = ui.visuals();
-    let bg = if selected {
+    let base_bg = if selected {
         let base = visuals.selection.bg_fill;
         if response.hovered() {
             egui::Color32::from_rgba_unmultiplied(
@@ -354,7 +394,23 @@ fn row_widget(
         visuals.extreme_bg_color
     };
 
-    ui.painter().rect_filled(rect, 0.0, bg);
+    ui.painter().rect_filled(rect, 0.0, base_bg);
+
+    if is_current && !selected {
+        ui.painter().rect_filled(
+            rect,
+            0.0,
+            egui::Color32::from_rgba_unmultiplied(46, 124, 246, 16),
+        );
+    }
+
+    if is_current {
+        let accent_rect = egui::Rect::from_min_size(
+            rect.left_top(),
+            egui::vec2(3.0, rect.height()),
+        );
+        ui.painter().rect_filled(accent_rect, 0.0, ACCENT_BLUE);
+    }
 
     // thin separator line at the bottom of the row
     let sep_color = visuals.widgets.noninteractive.bg_stroke.color;
@@ -365,10 +421,11 @@ fn row_widget(
 
     let font_id = egui::TextStyle::Monospace.resolve(ui.style());
     let line_height = ui.text_style_height(&egui::TextStyle::Monospace);
+    let text_left = rect.left() + 8.0;
 
     if let Some(id) = track_id {
         let padding = (rect.height() - line_height * 2.0) * 0.5;
-        let main_pos = rect.left_top() + egui::vec2(0.0, padding);
+        let main_pos = egui::pos2(text_left, rect.top() + padding);
         let sub_pos = main_pos + egui::vec2(0.0, line_height);
         ui.painter().text(
             main_pos,
@@ -386,7 +443,7 @@ fn row_widget(
         );
     } else {
         ui.painter().text(
-            rect.left_center(),
+            egui::pos2(text_left, rect.center().y),
             egui::Align2::LEFT_CENTER,
             text,
             font_id,
@@ -467,9 +524,227 @@ impl App {
             s.error = None;
             s.running = true;
             s.track_id_column = None;
+            s.lineage_done = false;
+            s.needs_revalidation = true;
         }
 
         lineage::detect_track_column(query.clone(), Arc::clone(&state), ctx.clone());
         http::run_query(query, state, ctx);
+    }
+
+    fn play_track(&mut self, index: usize, id: String, ctx: &egui::Context) {
+        {
+            let mut ct = self.current_track.lock().unwrap();
+            *ct = Some(CurrentTrack {
+                id: id.clone(),
+                row_index: Some(index),
+                title: None,
+                artist_names: Vec::new(),
+            });
+        }
+        self.audio.load(&id);
+        self.audio.play();
+        http::fetch_track_metadata(id, Arc::clone(&self.current_track), ctx.clone());
+    }
+
+    fn maybe_revalidate_current_track_index(&mut self) {
+        let (needs, track_id_column, running, lineage_done) = {
+            let s = self.state.lock().unwrap();
+            (
+                s.needs_revalidation,
+                s.track_id_column,
+                s.running,
+                s.lineage_done,
+            )
+        };
+        if !needs || running || !lineage_done {
+            return;
+        }
+
+        let mut ct_guard = self.current_track.lock().unwrap();
+        let Some(ct) = ct_guard.as_mut() else {
+            // Still clear the flag — no current track to revalidate.
+            drop(ct_guard);
+            self.state.lock().unwrap().needs_revalidation = false;
+            return;
+        };
+
+        let Some(col) = track_id_column else {
+            ct.row_index = None;
+            drop(ct_guard);
+            self.state.lock().unwrap().needs_revalidation = false;
+            return;
+        };
+
+        let state = self.state.lock().unwrap();
+        let rows = &state.rows;
+        let id = ct.id.as_str();
+
+        if let Some(idx) = ct.row_index
+            && rows.get(idx).and_then(|r| r.get(col)).map(String::as_str) == Some(id)
+        {
+            drop(state);
+            drop(ct_guard);
+            self.state.lock().unwrap().needs_revalidation = false;
+            return;
+        }
+
+        let scan_limit = rows.len().min(1000);
+        let mut found: Option<usize> = None;
+        for (i, row) in rows.iter().take(scan_limit).enumerate() {
+            if row.get(col).map(String::as_str) == Some(id) {
+                found = Some(i);
+                break;
+            }
+        }
+        ct.row_index = found;
+        drop(state);
+        drop(ct_guard);
+        self.state.lock().unwrap().needs_revalidation = false;
+    }
+
+    fn render_now_playing(&mut self, ctx: &egui::Context) {
+        let snapshot = self.current_track.lock().unwrap().clone();
+        let Some(ct) = snapshot else {
+            return;
+        };
+
+        let playing = self.audio.is_playing();
+        let position = self.audio.position();
+        let duration = self.audio.duration();
+
+        if playing {
+            ctx.request_repaint_after(Duration::from_millis(50));
+        }
+
+        let mut toggle = false;
+        egui::TopBottomPanel::bottom("now_playing")
+            .exact_height(72.0)
+            .show_separator_line(true)
+            .frame(egui::Frame::new().inner_margin(egui::Margin::same(0)))
+            .show(ctx, |ui| {
+                let full = ui.available_rect_before_wrap();
+                let top_h = 48.0;
+                let top_rect =
+                    egui::Rect::from_min_size(full.min, egui::vec2(full.width(), top_h));
+                let bottom_rect = egui::Rect::from_min_size(
+                    egui::pos2(full.min.x, full.min.y + top_h),
+                    egui::vec2(full.width(), full.height() - top_h),
+                );
+
+                let icon_font = egui::FontId::new(
+                    22.0,
+                    egui::FontFamily::Name("phosphor-fill".into()),
+                );
+                let icon_char = if playing {
+                    egui_phosphor::fill::PAUSE
+                } else {
+                    egui_phosphor::fill::PLAY
+                };
+                let visuals = ui.visuals().clone();
+
+                let button_size = egui::vec2(36.0, 36.0);
+                let button_margin = 12.0;
+                let btn_rect = egui::Rect::from_min_size(
+                    egui::pos2(
+                        top_rect.max.x - button_margin - button_size.x,
+                        top_rect.center().y - button_size.y * 0.5,
+                    ),
+                    button_size,
+                );
+                let btn_resp = ui.interact(
+                    btn_rect,
+                    ui.id().with("now_playing_toggle"),
+                    egui::Sense::click(),
+                );
+                if btn_resp.hovered() {
+                    ui.painter().rect_filled(
+                        btn_rect,
+                        6.0,
+                        visuals.widgets.hovered.weak_bg_fill,
+                    );
+                }
+                ui.painter().text(
+                    btn_rect.center(),
+                    egui::Align2::CENTER_CENTER,
+                    icon_char,
+                    icon_font,
+                    visuals.text_color(),
+                );
+                if btn_resp.clicked() {
+                    toggle = true;
+                }
+
+                // -- Title + artist text on the left --
+                let title_font = egui::FontId::proportional(14.0);
+                let artist_font = egui::FontId::proportional(12.0);
+                let text_left = top_rect.min.x + 16.0;
+                let line_gap = 4.0;
+                let title_h = 16.0;
+                let artist_h = 14.0;
+                let total_text_h = title_h + line_gap + artist_h;
+                let text_top = top_rect.center().y - total_text_h * 0.5;
+                let title = ct.title.as_deref().unwrap_or("");
+                ui.painter().text(
+                    egui::pos2(text_left, text_top),
+                    egui::Align2::LEFT_TOP,
+                    title,
+                    title_font,
+                    visuals.text_color(),
+                );
+                let artists = ct.artist_names.join(", ");
+                ui.painter().text(
+                    egui::pos2(text_left, text_top + title_h + line_gap),
+                    egui::Align2::LEFT_TOP,
+                    artists,
+                    artist_font,
+                    visuals.weak_text_color(),
+                );
+
+                // -- Bottom area: timeline pills --
+                let progress = match (duration, position) {
+                    (Some(d), p) if d > 0.0 => (p / d).clamp(0.0, 1.0) as f32,
+                    _ => 0.0,
+                };
+                let timeline_height = 4.0;
+                let pad_x = 16.0;
+                let pad_y = (bottom_rect.height() - timeline_height) * 0.5;
+                let track_rect = egui::Rect::from_min_size(
+                    egui::pos2(bottom_rect.min.x + pad_x, bottom_rect.min.y + pad_y),
+                    egui::vec2(bottom_rect.width() - pad_x * 2.0, timeline_height),
+                );
+                let gap = 4.0;
+                let played_w = track_rect.width() * progress;
+                let rounding = timeline_height * 0.5;
+                let unplayed_color =
+                    egui::Color32::from_rgba_unmultiplied(46, 124, 246, 70);
+
+                if played_w > 0.0 {
+                    let played_rect = egui::Rect::from_min_size(
+                        track_rect.min,
+                        egui::vec2((played_w - gap * 0.5).max(0.0), timeline_height),
+                    );
+                    if played_rect.width() > 0.0 {
+                        ui.painter().rect_filled(played_rect, rounding, ACCENT_BLUE);
+                    }
+                }
+                let unplayed_start = track_rect.min.x + (played_w + gap * 0.5).max(0.0);
+                if unplayed_start < track_rect.max.x {
+                    let unplayed_rect = egui::Rect::from_min_max(
+                        egui::pos2(unplayed_start, track_rect.min.y),
+                        egui::pos2(track_rect.max.x, track_rect.max.y),
+                    );
+                    ui.painter()
+                        .rect_filled(unplayed_rect, rounding, unplayed_color);
+                }
+            });
+
+        if toggle {
+            if playing {
+                self.audio.pause();
+            } else {
+                self.audio.play();
+            }
+        }
     }
 }

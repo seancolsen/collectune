@@ -1,5 +1,5 @@
 use std::io::{self, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use audiopus::coder::Encoder as OpusEncoder;
@@ -70,32 +70,51 @@ fn format_content_type(format: &str) -> &'static str {
 }
 
 struct TrackFile {
-    path: String,
+    path: PathBuf,
     format: String,
+}
+
+fn resolve_path(collection_path: &Path, relative: &str) -> PathBuf {
+    let trimmed = relative.strip_prefix("./").unwrap_or(relative);
+    collection_path.join(trimmed)
 }
 
 fn lookup_track(state: &AppState, track_id: &str) -> Result<TrackFile, StatusCode> {
     let conn = state.db.lock().unwrap();
     let mut stmt = conn
         .prepare(
-            "SELECT f.path, f.format \
+            "SELECT f.path, f.format::VARCHAR \
              FROM track t JOIN file f ON t.file = f.id \
              WHERE t.id = TRY_CAST(? AS UUID)",
         )
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        .map_err(|e| {
+            eprintln!("stream: prepare failed: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
 
     let mut rows = stmt
         .query_map([track_id], |row| {
-            Ok(TrackFile {
-                path: row.get(0)?,
-                format: row.get(1)?,
-            })
+            let relative: String = row.get(0)?;
+            let format: String = row.get(1)?;
+            Ok((relative, format))
         })
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        .map_err(|e| {
+            eprintln!("stream: query_map failed: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
 
-    rows.next()
+    let (relative, format) = rows
+        .next()
         .ok_or(StatusCode::NOT_FOUND)?
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+        .map_err(|e| {
+            eprintln!("stream: row decode failed: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    Ok(TrackFile {
+        path: resolve_path(&state.collection_path, &relative),
+        format,
+    })
 }
 
 pub async fn stream_track(
@@ -112,7 +131,7 @@ pub async fn stream_track(
         Err(status) => return (status, "database error").into_response(),
     };
 
-    if !Path::new(&track.path).exists() {
+    if !track.path.exists() {
         return (StatusCode::NOT_FOUND, "file not found on disk").into_response();
     }
 
@@ -128,11 +147,21 @@ pub async fn stream_track(
 async fn passthrough_response(track: &TrackFile, request: Request) -> Response {
     let content_type = format_content_type(&track.format);
 
-    let mut response = ServeFile::new(&track.path)
-        .oneshot(request)
-        .await
-        .unwrap()
-        .into_response();
+    let result = ServeFile::new(&track.path).oneshot(request).await;
+    let mut response = match result {
+        Ok(resp) => resp.into_response(),
+        Err(err) => {
+            eprintln!(
+                "stream: ServeFile failed for {}: {err}",
+                track.path.display()
+            );
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("read failed: {err}"),
+            )
+                .into_response();
+        }
+    };
 
     response
         .headers_mut()
@@ -147,7 +176,7 @@ async fn transcode_response(track: &TrackFile, start: f64) -> Response {
     let file_path = track.path.clone();
 
     tokio::task::spawn_blocking(move || {
-        run_transcode_pipeline(&file_path, start, &tx, ready_tx);
+        run_transcode_pipeline(file_path.as_path(), start, &tx, ready_tx);
     });
 
     match ready_rx.await {
@@ -164,7 +193,7 @@ async fn transcode_response(track: &TrackFile, start: f64) -> Response {
 /// Ensures setup errors are communicated to the handler via `ready_tx`
 /// rather than silently dropping the channel.
 fn run_transcode_pipeline(
-    file_path: &str,
+    file_path: &Path,
     start: f64,
     tx: &mpsc::Sender<io::Result<Bytes>>,
     ready_tx: oneshot::Sender<Result<(), String>>,
@@ -247,7 +276,7 @@ fn build_opus_tags() -> Vec<u8> {
 
 #[allow(clippy::too_many_lines, clippy::similar_names)]
 fn transcode_inner(
-    file_path: &str,
+    file_path: &Path,
     start: f64,
     tx: &mpsc::Sender<io::Result<Bytes>>,
     ready_tx: &mut Option<oneshot::Sender<Result<(), String>>>,
@@ -260,7 +289,7 @@ fn transcode_inner(
     );
 
     let mut hint = Hint::new();
-    if let Some(ext) = Path::new(file_path).extension().and_then(|e| e.to_str()) {
+    if let Some(ext) = file_path.extension().and_then(|e| e.to_str()) {
         hint.with_extension(ext);
     }
 

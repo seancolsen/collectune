@@ -68,6 +68,7 @@ fn traces_to_track_id(root: &LineageNode) -> bool {
 fn apply(track_col: Option<usize>, state: &Mutex<QueryState>, ctx: &egui::Context) {
     let mut s = state.lock().unwrap();
     s.track_id_column = track_col;
+    s.lineage_done = true;
     drop(s);
     ctx.request_repaint();
 }

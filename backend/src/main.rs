@@ -40,6 +40,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if !args.no_scan {
         scanner::scan(collection_path, &conn)?;
     }
-    server::serve(conn, args.port).await?;
+    server::serve(conn, collection_path.to_path_buf(), args.port).await?;
     Ok(())
 }
