@@ -73,6 +73,7 @@ pub struct App {
     config_open: bool,
     current_track: Arc<Mutex<Option<CurrentTrack>>>,
     audio: Box<dyn AudioPlayer>,
+    pending_scroll_to_row: Option<usize>,
 }
 
 impl Default for App {
@@ -90,6 +91,7 @@ impl Default for App {
             config_open: false,
             current_track: Arc::new(Mutex::new(None)),
             audio: audio::new_player(),
+            pending_scroll_to_row: None,
         }
     }
 }
@@ -224,6 +226,15 @@ impl eframe::App for App {
             let mut clicked: Option<(usize, egui::Modifiers)> = None;
             let mut double_clicked: Option<(usize, String)> = None;
             if !state.rows.is_empty() {
+                let pending_locate = self
+                    .pending_scroll_to_row
+                    .take()
+                    .filter(|i| *i < state.rows.len());
+                if let Some(idx) = pending_locate {
+                    self.selection.clear();
+                    self.selection.insert(idx);
+                    self.selection_anchor = Some(idx);
+                }
                 let rows = &state.rows;
                 let selection = &self.selection;
                 let track_id_column = state.track_id_column;
@@ -241,34 +252,39 @@ impl eframe::App for App {
                     0.0
                 };
                 let row_height_padded = row_height + sub_line_height + padding * 2.0;
-                egui::ScrollArea::vertical()
-                    .auto_shrink([false, false])
-                    .show_rows(ui, row_height_padded, rows.len(), |ui, range| {
-                        ui.spacing_mut().item_spacing.y = 0.0;
-                        for index in range {
-                            let cells = &rows[index];
-                            let main_text = cells.join(" ");
-                            let track_id =
-                                track_id_column.and_then(|i| cells.get(i).map(String::as_str));
-                            let is_current = current_row == Some(index);
-                            let resp = row_widget(
-                                ui,
-                                &main_text,
-                                track_id,
-                                selection.contains(&index),
-                                is_current,
-                                row_height_padded,
-                            );
-                            if resp.double_clicked() {
-                                if let Some(id) = track_id {
-                                    double_clicked = Some((index, id.to_string()));
-                                }
-                            } else if resp.clicked() {
-                                let mods = ui.input(|i| i.modifiers);
-                                clicked = Some((index, mods));
+                let mut scroll_area = egui::ScrollArea::vertical().auto_shrink([false, false]);
+                if let Some(idx) = pending_locate {
+                    let viewport_h = ui.available_height();
+                    let target = (idx as f32 * row_height_padded)
+                        - (viewport_h - row_height_padded).max(0.0) * 0.5;
+                    scroll_area = scroll_area.vertical_scroll_offset(target.max(0.0));
+                }
+                scroll_area.show_rows(ui, row_height_padded, rows.len(), |ui, range| {
+                    ui.spacing_mut().item_spacing.y = 0.0;
+                    for index in range {
+                        let cells = &rows[index];
+                        let main_text = cells.join(" ");
+                        let track_id =
+                            track_id_column.and_then(|i| cells.get(i).map(String::as_str));
+                        let is_current = current_row == Some(index);
+                        let resp = row_widget(
+                            ui,
+                            &main_text,
+                            track_id,
+                            selection.contains(&index),
+                            is_current,
+                            row_height_padded,
+                        );
+                        if resp.double_clicked() {
+                            if let Some(id) = track_id {
+                                double_clicked = Some((index, id.to_string()));
                             }
+                        } else if resp.clicked() {
+                            let mods = ui.input(|i| i.modifiers);
+                            clicked = Some((index, mods));
                         }
-                    });
+                    }
+                });
             }
             drop(state);
 
@@ -616,6 +632,7 @@ impl App {
         }
 
         let mut toggle = false;
+        let mut action: Option<MenuAction> = None;
         let panel_fill = ctx.style().visuals.panel_fill;
         let sheet_fill = {
             let [r, g, b, a] = panel_fill.to_array();
@@ -684,7 +701,7 @@ impl App {
                 if play_resp.clicked() {
                     toggle = true;
                 }
-                let _menu_resp = ui.interact(
+                let menu_resp = ui.interact(
                     menu_btn_rect,
                     ui.id().with("now_playing_menu"),
                     egui::Sense::click(),
@@ -696,6 +713,29 @@ impl App {
                     icon_font,
                     visuals.text_color(),
                 );
+
+                let next_info = self.next_track_info();
+                let can_next = next_info.is_some();
+                let can_locate = ct.row_index.is_some();
+                egui::Popup::menu(&menu_resp)
+                    .align(egui::RectAlign::TOP_END)
+                    .width(130.0)
+                    .show(|ui| {
+                        if menu_item(ui, egui_phosphor::fill::SKIP_FORWARD, "Next", can_next)
+                            .clicked()
+                        {
+                            action = Some(MenuAction::Next);
+                        }
+                        if menu_item(ui, egui_phosphor::bold::X, "Close", true).clicked() {
+                            action = Some(MenuAction::Close);
+                        }
+                        if menu_item(ui, egui_phosphor::fill::CROSSHAIR, "Locate", can_locate)
+                            .clicked()
+                        {
+                            action = Some(MenuAction::Locate);
+                        }
+                        let _ = menu_item(ui, egui_phosphor::fill::PENCIL, "Edit", true);
+                    });
 
                 // -- Title + artist text on the left --
                 let title_font = egui::FontId::proportional(13.0);
@@ -768,5 +808,89 @@ impl App {
                 self.audio.play();
             }
         }
+
+        match action {
+            Some(MenuAction::Next) => {
+                if let Some((next_idx, id)) = self.next_track_info() {
+                    self.play_track(next_idx, id, ctx);
+                }
+            }
+            Some(MenuAction::Close) => {
+                self.audio.pause();
+                *self.current_track.lock().unwrap() = None;
+            }
+            Some(MenuAction::Locate) => {
+                if let Some(idx) = ct.row_index {
+                    self.pending_scroll_to_row = Some(idx);
+                    ctx.request_repaint();
+                }
+            }
+            None => {}
+        }
     }
+
+    fn next_track_info(&self) -> Option<(usize, String)> {
+        let cur_idx = self.current_track.lock().unwrap().as_ref()?.row_index?;
+        let s = self.state.lock().unwrap();
+        let col = s.track_id_column?;
+        let next_idx = cur_idx + 1;
+        let id = s.rows.get(next_idx)?.get(col)?.clone();
+        if id.is_empty() {
+            return None;
+        }
+        Some((next_idx, id))
+    }
+}
+
+#[derive(Clone, Copy)]
+enum MenuAction {
+    Next,
+    Close,
+    Locate,
+}
+
+fn menu_item(ui: &mut egui::Ui, icon: &str, label: &str, enabled: bool) -> egui::Response {
+    let row_height = 28.0;
+    let icon_size = 16.0;
+    let label_size = 13.0;
+    let row_width = ui.available_width();
+    let sense = if enabled {
+        egui::Sense::click()
+    } else {
+        egui::Sense::hover()
+    };
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(row_width, row_height), sense);
+
+    let visuals = ui.visuals();
+    if enabled && resp.hovered() {
+        ui.painter()
+            .rect_filled(rect, 4.0, visuals.widgets.hovered.weak_bg_fill);
+    }
+
+    let text_color = if enabled {
+        visuals.text_color()
+    } else {
+        visuals.weak_text_color()
+    };
+
+    let icon_font = egui::FontId::new(icon_size, egui::FontFamily::Name("phosphor-fill".into()));
+    let label_font = egui::FontId::proportional(label_size);
+    let pad_x = 10.0;
+    let icon_x = rect.left() + pad_x;
+    ui.painter().text(
+        egui::pos2(icon_x, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        icon,
+        icon_font,
+        text_color,
+    );
+    ui.painter().text(
+        egui::pos2(icon_x + icon_size + 10.0, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        label,
+        label_font,
+        text_color,
+    );
+
+    resp
 }

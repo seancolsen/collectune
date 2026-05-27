@@ -83,7 +83,11 @@ mod wasm_impl {
 
         fn duration(&self) -> Option<f64> {
             let d = self.audio.duration();
-            if d.is_finite() && d > 0.0 { Some(d) } else { None }
+            if d.is_finite() && d > 0.0 {
+                Some(d)
+            } else {
+                None
+            }
         }
     }
 }

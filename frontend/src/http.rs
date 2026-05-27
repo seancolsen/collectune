@@ -46,7 +46,12 @@ pub(crate) fn fetch_track_metadata(
     let ct_for_handler = Arc::clone(&current_track);
     let ctx_for_handler = ctx.clone();
     let handler = move |batch: &RecordBatch| {
-        apply_metadata_batch(batch, &track_id_for_handler, &ct_for_handler, &ctx_for_handler);
+        apply_metadata_batch(
+            batch,
+            &track_id_for_handler,
+            &ct_for_handler,
+            &ctx_for_handler,
+        );
         Ok::<(), String>(())
     };
     let on_done = |_result: Result<(), String>| {};
@@ -164,11 +169,7 @@ fn push_batch(
     Ok(())
 }
 
-fn feed_decoder<H>(
-    decoder: &mut StreamDecoder,
-    chunk: Bytes,
-    handler: &mut H,
-) -> Result<(), String>
+fn feed_decoder<H>(decoder: &mut StreamDecoder, chunk: Bytes, handler: &mut H) -> Result<(), String>
 where
     H: FnMut(&RecordBatch) -> Result<(), String>,
 {
