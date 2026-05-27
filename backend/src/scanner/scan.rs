@@ -30,6 +30,7 @@ pub fn scan(collection_path: &Path, conn: &Connection) -> Result<(), Box<dyn std
     staging::create_staging_tables(conn)?;
     staging::insert_staging_data(conn, &staging_data)?;
     staging::execute_batch(conn)?;
+    conn.execute_batch("CHECKPOINT;")?;
 
     println!("Scan complete.");
     Ok(())
