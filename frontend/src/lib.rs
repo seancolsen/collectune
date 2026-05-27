@@ -405,10 +405,8 @@ fn row_widget(
     }
 
     if is_current {
-        let accent_rect = egui::Rect::from_min_size(
-            rect.left_top(),
-            egui::vec2(3.0, rect.height()),
-        );
+        let accent_rect =
+            egui::Rect::from_min_size(rect.left_top(), egui::vec2(3.0, rect.height()));
         ui.painter().rect_filled(accent_rect, 0.0, ACCENT_BLUE);
     }
 
@@ -618,72 +616,96 @@ impl App {
         }
 
         let mut toggle = false;
+        let panel_fill = ctx.style().visuals.panel_fill;
+        let sheet_fill = {
+            let [r, g, b, a] = panel_fill.to_array();
+            egui::Color32::from_rgba_unmultiplied(
+                r.saturating_sub(8),
+                g.saturating_sub(8),
+                b.saturating_sub(8),
+                a,
+            )
+        };
         egui::TopBottomPanel::bottom("now_playing")
-            .exact_height(72.0)
+            .exact_height(40.0)
             .show_separator_line(true)
-            .frame(egui::Frame::new().inner_margin(egui::Margin::same(0)))
+            .frame(
+                egui::Frame::new()
+                    .inner_margin(egui::Margin::same(0))
+                    .fill(sheet_fill),
+            )
             .show(ctx, |ui| {
                 let full = ui.available_rect_before_wrap();
-                let top_h = 48.0;
-                let top_rect =
-                    egui::Rect::from_min_size(full.min, egui::vec2(full.width(), top_h));
-                let bottom_rect = egui::Rect::from_min_size(
-                    egui::pos2(full.min.x, full.min.y + top_h),
-                    egui::vec2(full.width(), full.height() - top_h),
-                );
+                let pad_x = 8.0;
 
-                let icon_font = egui::FontId::new(
-                    22.0,
-                    egui::FontFamily::Name("phosphor-fill".into()),
-                );
+                let icon_font =
+                    egui::FontId::new(18.0, egui::FontFamily::Name("phosphor-fill".into()));
                 let icon_char = if playing {
                     egui_phosphor::fill::PAUSE
                 } else {
                     egui_phosphor::fill::PLAY
                 };
+                let menu_icon_char = egui_phosphor::fill::DOTS_THREE_OUTLINE_VERTICAL;
                 let visuals = ui.visuals().clone();
 
-                let button_size = egui::vec2(36.0, 36.0);
-                let button_margin = 12.0;
-                let btn_rect = egui::Rect::from_min_size(
+                // -- Buttons on the right (play/pause, then menu) --
+                let button_size = egui::vec2(26.0, 26.0);
+                let button_gap = 4.0;
+                let timeline_height = 4.0;
+                let timeline_bottom_pad = 2.0;
+                let above_timeline_h = full.height() - timeline_height - timeline_bottom_pad;
+                let buttons_center_y = full.min.y + above_timeline_h * 0.5;
+                let menu_btn_rect = egui::Rect::from_min_size(
                     egui::pos2(
-                        top_rect.max.x - button_margin - button_size.x,
-                        top_rect.center().y - button_size.y * 0.5,
+                        full.max.x - pad_x - button_size.x,
+                        buttons_center_y - button_size.y * 0.5,
                     ),
                     button_size,
                 );
-                let btn_resp = ui.interact(
-                    btn_rect,
+                let play_btn_rect = egui::Rect::from_min_size(
+                    egui::pos2(
+                        menu_btn_rect.min.x - button_gap - button_size.x,
+                        buttons_center_y - button_size.y * 0.5,
+                    ),
+                    button_size,
+                );
+                let play_resp = ui.interact(
+                    play_btn_rect,
                     ui.id().with("now_playing_toggle"),
                     egui::Sense::click(),
                 );
-                if btn_resp.hovered() {
-                    ui.painter().rect_filled(
-                        btn_rect,
-                        6.0,
-                        visuals.widgets.hovered.weak_bg_fill,
-                    );
-                }
                 ui.painter().text(
-                    btn_rect.center(),
+                    play_btn_rect.center(),
                     egui::Align2::CENTER_CENTER,
                     icon_char,
+                    icon_font.clone(),
+                    visuals.text_color(),
+                );
+                if play_resp.clicked() {
+                    toggle = true;
+                }
+                let _menu_resp = ui.interact(
+                    menu_btn_rect,
+                    ui.id().with("now_playing_menu"),
+                    egui::Sense::click(),
+                );
+                ui.painter().text(
+                    menu_btn_rect.center(),
+                    egui::Align2::CENTER_CENTER,
+                    menu_icon_char,
                     icon_font,
                     visuals.text_color(),
                 );
-                if btn_resp.clicked() {
-                    toggle = true;
-                }
 
                 // -- Title + artist text on the left --
-                let title_font = egui::FontId::proportional(14.0);
-                let artist_font = egui::FontId::proportional(12.0);
-                let text_left = top_rect.min.x + 16.0;
-                let line_gap = 4.0;
-                let title_h = 16.0;
-                let artist_h = 14.0;
+                let title_font = egui::FontId::proportional(13.0);
+                let artist_font = egui::FontId::proportional(11.0);
+                let text_left = full.min.x + pad_x;
+                let title_h = 14.0;
+                let line_gap = 1.0;
+                let artist_h = 11.0;
                 let total_text_h = title_h + line_gap + artist_h;
-                let text_top = top_rect.center().y - total_text_h * 0.5;
+                let text_top = full.min.y + above_timeline_h * 0.5 - total_text_h * 0.5;
                 let title = ct.title.as_deref().unwrap_or("");
                 ui.painter().text(
                     egui::pos2(text_left, text_top),
@@ -701,23 +723,23 @@ impl App {
                     visuals.weak_text_color(),
                 );
 
-                // -- Bottom area: timeline pills --
+                // -- Timeline pills near the bottom --
                 let progress = match (duration, position) {
                     (Some(d), p) if d > 0.0 => (p / d).clamp(0.0, 1.0) as f32,
                     _ => 0.0,
                 };
-                let timeline_height = 4.0;
-                let pad_x = 16.0;
-                let pad_y = (bottom_rect.height() - timeline_height) * 0.5;
+                let timeline_pad_x = 2.0;
                 let track_rect = egui::Rect::from_min_size(
-                    egui::pos2(bottom_rect.min.x + pad_x, bottom_rect.min.y + pad_y),
-                    egui::vec2(bottom_rect.width() - pad_x * 2.0, timeline_height),
+                    egui::pos2(
+                        full.min.x + timeline_pad_x,
+                        full.max.y - timeline_bottom_pad - timeline_height,
+                    ),
+                    egui::vec2(full.width() - timeline_pad_x * 2.0, timeline_height),
                 );
                 let gap = 4.0;
                 let played_w = track_rect.width() * progress;
                 let rounding = timeline_height * 0.5;
-                let unplayed_color =
-                    egui::Color32::from_rgba_unmultiplied(46, 124, 246, 70);
+                let unplayed_color = egui::Color32::from_rgba_unmultiplied(46, 124, 246, 70);
 
                 if played_w > 0.0 {
                     let played_rect = egui::Rect::from_min_size(
