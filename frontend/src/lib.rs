@@ -629,6 +629,14 @@ impl App {
 
         if playing {
             ctx.request_repaint_after(Duration::from_millis(50));
+        } else if self.audio.has_ended() {
+            if let Some((next_idx, id)) = self.next_track_info() {
+                self.play_track(next_idx, id, ctx);
+            } else {
+                *self.current_track.lock().unwrap() = None;
+            }
+            ctx.request_repaint();
+            return;
         }
 
         let mut toggle = false;

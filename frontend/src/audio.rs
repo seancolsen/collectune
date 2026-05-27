@@ -3,6 +3,7 @@ pub trait AudioPlayer {
     fn play(&mut self);
     fn pause(&mut self);
     fn is_playing(&self) -> bool;
+    fn has_ended(&self) -> bool;
     fn position(&self) -> f64;
     fn duration(&self) -> Option<f64>;
 }
@@ -76,6 +77,10 @@ mod wasm_impl {
             !self.audio.paused() && !self.audio.ended()
         }
 
+        fn has_ended(&self) -> bool {
+            self.audio.ended()
+        }
+
         fn position(&self) -> f64 {
             let t = self.audio.current_time();
             if t.is_finite() { t } else { 0.0 }
@@ -120,6 +125,10 @@ mod native_impl {
 
         fn is_playing(&self) -> bool {
             self.playing
+        }
+
+        fn has_ended(&self) -> bool {
+            false
         }
 
         fn position(&self) -> f64 {
