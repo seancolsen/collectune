@@ -5,6 +5,7 @@ use eframe::egui;
 use eframe::egui::emath::TSTransform;
 
 mod http;
+mod lineage;
 #[cfg(target_arch = "wasm32")]
 mod web;
 
@@ -37,9 +38,10 @@ pub fn setup_fonts(ctx: &egui::Context) {
 
 #[derive(Default)]
 pub(crate) struct QueryState {
-    pub(crate) rows: Vec<String>,
+    pub(crate) rows: Vec<Vec<String>>,
     pub(crate) error: Option<String>,
     pub(crate) running: bool,
+    pub(crate) track_id_column: Option<usize>,
 }
 
 pub struct App {
@@ -200,17 +202,28 @@ impl eframe::App for App {
             if !state.rows.is_empty() {
                 let rows = &state.rows;
                 let selection = &self.selection;
+                let track_id_column = state.track_id_column;
                 let row_height = ui.text_style_height(&egui::TextStyle::Monospace);
                 let padding = 6.0;
-                let row_height_padded = row_height + padding * 2.0;
+                let sub_line_height = if track_id_column.is_some() {
+                    row_height
+                } else {
+                    0.0
+                };
+                let row_height_padded = row_height + sub_line_height + padding * 2.0;
                 egui::ScrollArea::vertical()
                     .auto_shrink([false, false])
                     .show_rows(ui, row_height_padded, rows.len(), |ui, range| {
                         ui.spacing_mut().item_spacing.y = 0.0;
                         for index in range {
+                            let cells = &rows[index];
+                            let main_text = cells.join(" ");
+                            let track_id =
+                                track_id_column.and_then(|i| cells.get(i).map(String::as_str));
                             let resp = row_widget(
                                 ui,
-                                &rows[index],
+                                &main_text,
+                                track_id,
                                 selection.contains(&index),
                                 row_height_padded,
                             );
@@ -312,7 +325,13 @@ fn static_friction(dx: f32, friction: f32) -> f32 {
     dx - friction * (dx / friction).tanh()
 }
 
-fn row_widget(ui: &mut egui::Ui, text: &str, selected: bool, height: f32) -> egui::Response {
+fn row_widget(
+    ui: &mut egui::Ui,
+    text: &str,
+    track_id: Option<&str>,
+    selected: bool,
+    height: f32,
+) -> egui::Response {
     let desired = egui::vec2(ui.available_width(), height);
     let (rect, response) = ui.allocate_exact_size(desired, egui::Sense::click());
 
@@ -345,13 +364,35 @@ fn row_widget(ui: &mut egui::Ui, text: &str, selected: bool, height: f32) -> egu
     );
 
     let font_id = egui::TextStyle::Monospace.resolve(ui.style());
-    ui.painter().text(
-        rect.left_center(),
-        egui::Align2::LEFT_CENTER,
-        text,
-        font_id,
-        visuals.text_color(),
-    );
+    let line_height = ui.text_style_height(&egui::TextStyle::Monospace);
+
+    if let Some(id) = track_id {
+        let padding = (rect.height() - line_height * 2.0) * 0.5;
+        let main_pos = rect.left_top() + egui::vec2(0.0, padding);
+        let sub_pos = main_pos + egui::vec2(0.0, line_height);
+        ui.painter().text(
+            main_pos,
+            egui::Align2::LEFT_TOP,
+            text,
+            font_id.clone(),
+            visuals.text_color(),
+        );
+        ui.painter().text(
+            sub_pos,
+            egui::Align2::LEFT_TOP,
+            format!("track.id: {id}"),
+            font_id,
+            visuals.weak_text_color(),
+        );
+    } else {
+        ui.painter().text(
+            rect.left_center(),
+            egui::Align2::LEFT_CENTER,
+            text,
+            font_id,
+            visuals.text_color(),
+        );
+    }
 
     response
 }
@@ -425,8 +466,10 @@ impl App {
             s.rows.clear();
             s.error = None;
             s.running = true;
+            s.track_id_column = None;
         }
 
+        lineage::detect_track_column(query.clone(), Arc::clone(&state), ctx.clone());
         http::run_query(query, state, ctx);
     }
 }

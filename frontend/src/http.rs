@@ -59,14 +59,11 @@ fn push_batch(
         .map_err(|e| e.to_string())?;
     let mut s = state.lock().unwrap();
     for row in 0..batch.num_rows() {
-        let mut line = String::new();
-        for (i, fmt) in formatters.iter().enumerate() {
-            if i > 0 {
-                line.push(' ');
-            }
-            line.push_str(&fmt.value(row).to_string());
-        }
-        s.rows.push(line);
+        let cells: Vec<String> = formatters
+            .iter()
+            .map(|fmt| fmt.value(row).to_string())
+            .collect();
+        s.rows.push(cells);
     }
     drop(s);
     ctx.request_repaint();
