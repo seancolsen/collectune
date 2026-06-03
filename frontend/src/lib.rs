@@ -244,7 +244,7 @@ impl eframe::App for App {
                     .unwrap()
                     .as_ref()
                     .and_then(|c| c.row_index);
-                let row_height = ui.text_style_height(&egui::TextStyle::Monospace);
+                let row_height = ui.text_style_height(&egui::TextStyle::Body);
                 let padding = 6.0;
                 let sub_line_height = if track_id_column.is_some() {
                     row_height
@@ -433,8 +433,8 @@ fn row_widget(
         egui::Stroke::new(1.0, sep_color),
     );
 
-    let font_id = egui::TextStyle::Monospace.resolve(ui.style());
-    let line_height = ui.text_style_height(&egui::TextStyle::Monospace);
+    let font_id = egui::TextStyle::Body.resolve(ui.style());
+    let line_height = ui.text_style_height(&egui::TextStyle::Body);
     let text_left = rect.left() + 8.0;
 
     if let Some(id) = track_id {
