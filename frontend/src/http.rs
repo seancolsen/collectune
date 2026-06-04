@@ -14,13 +14,13 @@ const BASE: &str = "/api";
 #[cfg(not(target_arch = "wasm32"))]
 const BASE: &str = "http://localhost:3000";
 
-pub(crate) fn run_query(query: String, state: Arc<Mutex<QueryState>>, ctx: egui::Context) {
+pub(crate) fn run_query(query: String, state: &Arc<Mutex<QueryState>>, ctx: &egui::Context) {
     let handler = {
-        let state = Arc::clone(&state);
+        let state = Arc::clone(state);
         let ctx = ctx.clone();
         move |batch: &RecordBatch| push_batch(batch, &state, &ctx)
     };
-    let state_done = Arc::clone(&state);
+    let state_done = Arc::clone(state);
     let ctx_done = ctx.clone();
     let on_done = move |result: Result<(), String>| finish(result, &state_done, &ctx_done);
     stream_query(query, handler, on_done);
@@ -82,9 +82,9 @@ async fn fetch_schema_wasm() -> Result<String, String> {
 }
 
 pub(crate) fn fetch_track_metadata(
-    track_id: String,
-    current_track: Arc<Mutex<Option<CurrentTrack>>>,
-    ctx: egui::Context,
+    track_id: &str,
+    current_track: &Arc<Mutex<Option<CurrentTrack>>>,
+    ctx: &egui::Context,
 ) {
     let sql = format!(
         "with a as (\
@@ -97,14 +97,14 @@ pub(crate) fn fetch_track_metadata(
          where t.id = TRY_CAST('{track_id}' as UUID);",
         track_id = track_id.replace('\'', "''"),
     );
-    let track_id_for_handler = track_id.clone();
-    let ct_for_handler = Arc::clone(&current_track);
+    let track_id_for_handler = track_id.to_string();
+    let current_track_for_handler = Arc::clone(current_track);
     let ctx_for_handler = ctx.clone();
     let handler = move |batch: &RecordBatch| {
         apply_metadata_batch(
             batch,
             &track_id_for_handler,
-            &ct_for_handler,
+            &current_track_for_handler,
             &ctx_for_handler,
         );
         Ok::<(), String>(())

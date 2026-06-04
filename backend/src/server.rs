@@ -170,9 +170,9 @@ struct RefJson {
     column: String,
 }
 
-/// Introspects the DuckDB database and returns its structure as Querydown schema JSON.
+/// Introspects the `DuckDB` database and returns its structure as Querydown schema JSON.
 ///
-/// DuckDB has no foreign keys, so links are synthesized by convention: any `UUID`
+/// `DuckDB` has no foreign keys, so links are synthesized by convention: any `UUID`
 /// column whose name matches another table's name is treated as a link to that
 /// table's `id` column.
 async fn schema(State(state): State<Arc<AppState>>) -> Response<Body> {

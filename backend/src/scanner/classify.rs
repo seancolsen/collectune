@@ -40,11 +40,10 @@ pub fn get_audio_files(dir: &Path) -> Vec<PathBuf> {
 /// Falls back to the original path string if canonicalization fails.
 fn normalize_path(path: &Path, canonical_root: &Path) -> String {
     let canonical = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
-    let relative = canonical
-        .strip_prefix(canonical_root)
-        .map(|rel| format!("./{}", rel.display()))
-        .unwrap_or_else(|_| path.to_string_lossy().to_string());
-    relative
+    canonical.strip_prefix(canonical_root).map_or_else(
+        |_| path.to_string_lossy().to_string(),
+        |rel| format!("./{}", rel.display()),
+    )
 }
 
 fn hash_file(path: &Path) -> Option<[u8; 32]> {
@@ -131,7 +130,7 @@ fn classify_as_new(
     let format = extension_to_format(ext)?;
 
     let (metadata, duration) = get_track_metadata(real_path)?;
-    let size = fs::metadata(real_path).map(|m| m.len()).unwrap_or(0);
+    let size = fs::metadata(real_path).map_or(0, |m| m.len());
 
     Some(FileClassification::New(NewFileData {
         path: path_str,

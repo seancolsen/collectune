@@ -61,16 +61,22 @@ pub(crate) struct CurrentTrack {
 
 const ACCENT_BLUE: egui::Color32 = egui::Color32::from_rgb(0x2E, 0x7C, 0xF6);
 
+/// Sliding "organizer" side panel state, including the in-progress drag gesture.
+#[derive(Default)]
+struct Organizer {
+    open: bool,
+    dragging: bool,
+    drag_dx: f32,
+    drag_start_progress: f32,
+    dragged_progress: f32,
+}
+
 pub struct App {
     query_text: String,
     state: Arc<Mutex<QueryState>>,
     selection: HashSet<usize>,
     selection_anchor: Option<usize>,
-    organizer_open: bool,
-    organizer_dragging: bool,
-    organizer_drag_dx: f32,
-    organizer_drag_start_progress: f32,
-    organizer_dragged_progress: f32,
+    organizer: Organizer,
     config_open: bool,
     current_track: Arc<Mutex<Option<CurrentTrack>>>,
     audio: Box<dyn AudioPlayer>,
@@ -87,11 +93,7 @@ impl Default for App {
             state: Arc::new(Mutex::new(QueryState::default())),
             selection: HashSet::new(),
             selection_anchor: None,
-            organizer_open: false,
-            organizer_dragging: false,
-            organizer_drag_dx: 0.0,
-            organizer_drag_start_progress: 0.0,
-            organizer_dragged_progress: 0.0,
+            organizer: Organizer::default(),
             config_open: false,
             current_track: Arc::new(Mutex::new(None)),
             audio: audio::new_player(),
@@ -112,9 +114,9 @@ impl eframe::App for App {
 
         let panel_fill = ctx.style().visuals.panel_fill;
 
-        let (anim_target, anim_time) = if self.organizer_dragging {
-            (self.organizer_dragged_progress, 0.0)
-        } else if self.organizer_open {
+        let (anim_target, anim_time) = if self.organizer.dragging {
+            (self.organizer.dragged_progress, 0.0)
+        } else if self.organizer.open {
             (1.0, ORGANIZER_ANIM_TIME)
         } else {
             (0.0, ORGANIZER_ANIM_TIME)
@@ -144,7 +146,7 @@ impl eframe::App for App {
                         )
                         .clicked()
                     {
-                        self.organizer_open = !self.organizer_open;
+                        self.organizer.open = !self.organizer.open;
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.add_space(8.0);
@@ -303,7 +305,7 @@ impl eframe::App for App {
                 self.handle_row_click(index, mods);
             }
             if let Some((index, id)) = double_clicked {
-                self.play_track(index, id, ctx);
+                self.play_track(index, &id, ctx);
             }
         });
 
@@ -315,8 +317,8 @@ impl eframe::App for App {
         // Render while dragging even at progress == 0 so the widget that
         // owns the in-flight drag stays mounted and `drag_stopped` fires on
         // release — otherwise pulling the drawer fully closed before letting
-        // go strands `organizer_dragging` at true.
-        if progress > 0.0 || self.organizer_dragging {
+        // go strands `organizer.dragging` at true.
+        if progress > 0.0 || self.organizer.dragging {
             let viewport = ctx.viewport_rect();
 
             // The scrim covers the full viewport — we don't try to align its
@@ -343,7 +345,7 @@ impl eframe::App for App {
                         egui::Color32::from_black_alpha(scrim_alpha),
                     );
                     if resp.clicked() {
-                        self.organizer_open = false;
+                        self.organizer.open = false;
                     }
                     self.handle_organizer_swipe(ctx, &resp, progress);
                 });
@@ -487,27 +489,27 @@ impl App {
         current_progress: f32,
     ) {
         if resp.drag_started() {
-            self.organizer_dragging = true;
-            self.organizer_drag_dx = 0.0;
-            self.organizer_drag_start_progress = current_progress;
-            self.organizer_dragged_progress = current_progress;
+            self.organizer.dragging = true;
+            self.organizer.drag_dx = 0.0;
+            self.organizer.drag_start_progress = current_progress;
+            self.organizer.dragged_progress = current_progress;
         }
         if resp.dragged() {
-            self.organizer_drag_dx += resp.drag_delta().x;
-            let effective = static_friction(self.organizer_drag_dx, ORGANIZER_DRAG_FRICTION);
-            self.organizer_dragged_progress =
-                (self.organizer_drag_start_progress + effective / ORGANIZER_WIDTH).clamp(0.0, 1.0);
+            self.organizer.drag_dx += resp.drag_delta().x;
+            let effective = static_friction(self.organizer.drag_dx, ORGANIZER_DRAG_FRICTION);
+            self.organizer.dragged_progress =
+                (self.organizer.drag_start_progress + effective / ORGANIZER_WIDTH).clamp(0.0, 1.0);
         }
         if resp.drag_stopped() {
-            self.organizer_dragging = false;
+            self.organizer.dragging = false;
             let velocity_x = ctx.input(|i| i.pointer.velocity().x);
-            let effective = static_friction(self.organizer_drag_dx, ORGANIZER_DRAG_FRICTION);
+            let effective = static_friction(self.organizer.drag_dx, ORGANIZER_DRAG_FRICTION);
             let flick = velocity_x <= -ORGANIZER_SWIPE_VELOCITY;
             let dragged_past_midpoint = effective <= -ORGANIZER_WIDTH / 2.0;
             if flick || dragged_past_midpoint {
-                self.organizer_open = false;
+                self.organizer.open = false;
             }
-            self.organizer_drag_dx = 0.0;
+            self.organizer.drag_dx = 0.0;
         }
     }
 
@@ -573,22 +575,22 @@ impl App {
         };
 
         lineage::detect_track_column(sql.clone(), Arc::clone(&state), ctx.clone());
-        http::run_query(sql, state, ctx);
+        http::run_query(sql, &state, &ctx);
     }
 
-    fn play_track(&mut self, index: usize, id: String, ctx: &egui::Context) {
+    fn play_track(&mut self, index: usize, id: &str, ctx: &egui::Context) {
         {
             let mut ct = self.current_track.lock().unwrap();
             *ct = Some(CurrentTrack {
-                id: id.clone(),
+                id: id.to_string(),
                 row_index: Some(index),
                 title: None,
                 artist_names: Vec::new(),
             });
         }
-        self.audio.load(&id);
+        self.audio.load(id);
         self.audio.play();
-        http::fetch_track_metadata(id, Arc::clone(&self.current_track), ctx.clone());
+        http::fetch_track_metadata(id, &self.current_track, ctx);
     }
 
     fn maybe_revalidate_current_track_index(&mut self) {
@@ -661,7 +663,7 @@ impl App {
             ctx.request_repaint_after(Duration::from_millis(50));
         } else if self.audio.has_ended() {
             if let Some((next_idx, id)) = self.next_track_info() {
-                self.play_track(next_idx, id, ctx);
+                self.play_track(next_idx, &id, ctx);
             } else {
                 *self.current_track.lock().unwrap() = None;
             }
@@ -669,175 +671,7 @@ impl App {
             return;
         }
 
-        let mut toggle = false;
-        let mut action: Option<MenuAction> = None;
-        let panel_fill = ctx.style().visuals.panel_fill;
-        let sheet_fill = {
-            let [r, g, b, a] = panel_fill.to_array();
-            egui::Color32::from_rgba_unmultiplied(
-                r.saturating_sub(8),
-                g.saturating_sub(8),
-                b.saturating_sub(8),
-                a,
-            )
-        };
-        egui::TopBottomPanel::bottom("now_playing")
-            .exact_height(40.0)
-            .show_separator_line(true)
-            .frame(
-                egui::Frame::new()
-                    .inner_margin(egui::Margin::same(0))
-                    .fill(sheet_fill),
-            )
-            .show(ctx, |ui| {
-                let full = ui.available_rect_before_wrap();
-                let pad_x = 8.0;
-
-                let icon_font =
-                    egui::FontId::new(18.0, egui::FontFamily::Name("phosphor-fill".into()));
-                let icon_char = if playing {
-                    egui_phosphor::fill::PAUSE
-                } else {
-                    egui_phosphor::fill::PLAY
-                };
-                let menu_icon_char = egui_phosphor::fill::DOTS_THREE_OUTLINE_VERTICAL;
-                let visuals = ui.visuals().clone();
-
-                // -- Buttons on the right (play/pause, then menu) --
-                let button_size = egui::vec2(26.0, 26.0);
-                let button_gap = 4.0;
-                let timeline_height = 4.0;
-                let timeline_bottom_pad = 2.0;
-                let above_timeline_h = full.height() - timeline_height - timeline_bottom_pad;
-                let buttons_center_y = full.min.y + above_timeline_h * 0.5;
-                let menu_btn_rect = egui::Rect::from_min_size(
-                    egui::pos2(
-                        full.max.x - pad_x - button_size.x,
-                        buttons_center_y - button_size.y * 0.5,
-                    ),
-                    button_size,
-                );
-                let play_btn_rect = egui::Rect::from_min_size(
-                    egui::pos2(
-                        menu_btn_rect.min.x - button_gap - button_size.x,
-                        buttons_center_y - button_size.y * 0.5,
-                    ),
-                    button_size,
-                );
-                let play_resp = ui.interact(
-                    play_btn_rect,
-                    ui.id().with("now_playing_toggle"),
-                    egui::Sense::click(),
-                );
-                ui.painter().text(
-                    play_btn_rect.center(),
-                    egui::Align2::CENTER_CENTER,
-                    icon_char,
-                    icon_font.clone(),
-                    visuals.text_color(),
-                );
-                if play_resp.clicked() {
-                    toggle = true;
-                }
-                let menu_resp = ui.interact(
-                    menu_btn_rect,
-                    ui.id().with("now_playing_menu"),
-                    egui::Sense::click(),
-                );
-                ui.painter().text(
-                    menu_btn_rect.center(),
-                    egui::Align2::CENTER_CENTER,
-                    menu_icon_char,
-                    icon_font,
-                    visuals.text_color(),
-                );
-
-                let next_info = self.next_track_info();
-                let can_next = next_info.is_some();
-                let can_locate = ct.row_index.is_some();
-                egui::Popup::menu(&menu_resp)
-                    .align(egui::RectAlign::TOP_END)
-                    .width(130.0)
-                    .show(|ui| {
-                        if menu_item(ui, egui_phosphor::fill::SKIP_FORWARD, "Next", can_next)
-                            .clicked()
-                        {
-                            action = Some(MenuAction::Next);
-                        }
-                        if menu_item(ui, egui_phosphor::bold::X, "Close", true).clicked() {
-                            action = Some(MenuAction::Close);
-                        }
-                        if menu_item(ui, egui_phosphor::fill::CROSSHAIR, "Locate", can_locate)
-                            .clicked()
-                        {
-                            action = Some(MenuAction::Locate);
-                        }
-                        let _ = menu_item(ui, egui_phosphor::fill::PENCIL, "Edit", true);
-                    });
-
-                // -- Title + artist text on the left --
-                let title_font = egui::FontId::proportional(13.0);
-                let artist_font = egui::FontId::proportional(11.0);
-                let text_left = full.min.x + pad_x;
-                let title_h = 14.0;
-                let line_gap = 1.0;
-                let artist_h = 11.0;
-                let total_text_h = title_h + line_gap + artist_h;
-                let text_top = full.min.y + above_timeline_h * 0.5 - total_text_h * 0.5;
-                let title = ct.title.as_deref().unwrap_or("");
-                ui.painter().text(
-                    egui::pos2(text_left, text_top),
-                    egui::Align2::LEFT_TOP,
-                    title,
-                    title_font,
-                    visuals.text_color(),
-                );
-                let artists = ct.artist_names.join(", ");
-                ui.painter().text(
-                    egui::pos2(text_left, text_top + title_h + line_gap),
-                    egui::Align2::LEFT_TOP,
-                    artists,
-                    artist_font,
-                    visuals.weak_text_color(),
-                );
-
-                // -- Timeline pills near the bottom --
-                let progress = match (duration, position) {
-                    (Some(d), p) if d > 0.0 => (p / d).clamp(0.0, 1.0) as f32,
-                    _ => 0.0,
-                };
-                let timeline_pad_x = 2.0;
-                let track_rect = egui::Rect::from_min_size(
-                    egui::pos2(
-                        full.min.x + timeline_pad_x,
-                        full.max.y - timeline_bottom_pad - timeline_height,
-                    ),
-                    egui::vec2(full.width() - timeline_pad_x * 2.0, timeline_height),
-                );
-                let gap = 4.0;
-                let played_w = track_rect.width() * progress;
-                let rounding = timeline_height * 0.5;
-                let unplayed_color = egui::Color32::from_rgba_unmultiplied(46, 124, 246, 70);
-
-                if played_w > 0.0 {
-                    let played_rect = egui::Rect::from_min_size(
-                        track_rect.min,
-                        egui::vec2((played_w - gap * 0.5).max(0.0), timeline_height),
-                    );
-                    if played_rect.width() > 0.0 {
-                        ui.painter().rect_filled(played_rect, rounding, ACCENT_BLUE);
-                    }
-                }
-                let unplayed_start = track_rect.min.x + (played_w + gap * 0.5).max(0.0);
-                if unplayed_start < track_rect.max.x {
-                    let unplayed_rect = egui::Rect::from_min_max(
-                        egui::pos2(unplayed_start, track_rect.min.y),
-                        egui::pos2(track_rect.max.x, track_rect.max.y),
-                    );
-                    ui.painter()
-                        .rect_filled(unplayed_rect, rounding, unplayed_color);
-                }
-            });
+        let (toggle, action) = self.paint_now_playing_bar(ctx, &ct, playing, position, duration);
 
         if toggle {
             if playing {
@@ -850,7 +684,7 @@ impl App {
         match action {
             Some(MenuAction::Next) => {
                 if let Some((next_idx, id)) = self.next_track_info() {
-                    self.play_track(next_idx, id, ctx);
+                    self.play_track(next_idx, &id, ctx);
                 }
             }
             Some(MenuAction::Close) => {
@@ -865,6 +699,149 @@ impl App {
             }
             None => {}
         }
+    }
+
+    /// Paints the bottom "now playing" bar and reports whether playback should
+    /// toggle and which menu action (if any) the user picked.
+    fn paint_now_playing_bar(
+        &self,
+        ctx: &egui::Context,
+        ct: &CurrentTrack,
+        playing: bool,
+        position: f64,
+        duration: Option<f64>,
+    ) -> (bool, Option<MenuAction>) {
+        let panel_fill = ctx.style().visuals.panel_fill;
+        let sheet_fill = {
+            let [r, g, b, a] = panel_fill.to_array();
+            egui::Color32::from_rgba_unmultiplied(
+                r.saturating_sub(8),
+                g.saturating_sub(8),
+                b.saturating_sub(8),
+                a,
+            )
+        };
+
+        let mut toggle = false;
+        let mut action: Option<MenuAction> = None;
+        egui::TopBottomPanel::bottom("now_playing")
+            .exact_height(40.0)
+            .show_separator_line(true)
+            .frame(
+                egui::Frame::new()
+                    .inner_margin(egui::Margin::same(0))
+                    .fill(sheet_fill),
+            )
+            .show(ctx, |ui| {
+                let full = ui.available_rect_before_wrap();
+                let pad_x = 8.0;
+                let timeline_height = 4.0;
+                let timeline_bottom_pad = 2.0;
+                let above_timeline_h = full.height() - timeline_height - timeline_bottom_pad;
+
+                let (t, a) =
+                    self.draw_now_playing_controls(ui, full, pad_x, above_timeline_h, ct, playing);
+                toggle = t;
+                action = a;
+
+                draw_now_playing_text(ui, full, pad_x, above_timeline_h, ct);
+
+                let progress = match (duration, position) {
+                    (Some(d), p) if d > 0.0 => (p / d).clamp(0.0, 1.0) as f32,
+                    _ => 0.0,
+                };
+                draw_now_playing_timeline(ui, full, timeline_height, timeline_bottom_pad, progress);
+            });
+
+        (toggle, action)
+    }
+
+    /// Draws the play/pause button and overflow menu on the right of the bar.
+    fn draw_now_playing_controls(
+        &self,
+        ui: &egui::Ui,
+        full: egui::Rect,
+        pad_x: f32,
+        above_timeline_h: f32,
+        ct: &CurrentTrack,
+        playing: bool,
+    ) -> (bool, Option<MenuAction>) {
+        let mut toggle = false;
+        let mut action: Option<MenuAction> = None;
+
+        let icon_font = egui::FontId::new(18.0, egui::FontFamily::Name("phosphor-fill".into()));
+        let icon_char = if playing {
+            egui_phosphor::fill::PAUSE
+        } else {
+            egui_phosphor::fill::PLAY
+        };
+        let menu_icon_char = egui_phosphor::fill::DOTS_THREE_OUTLINE_VERTICAL;
+        let visuals = ui.visuals().clone();
+
+        let button_size = egui::vec2(26.0, 26.0);
+        let button_gap = 4.0;
+        let buttons_center_y = full.min.y + above_timeline_h * 0.5;
+        let menu_btn_rect = egui::Rect::from_min_size(
+            egui::pos2(
+                full.max.x - pad_x - button_size.x,
+                buttons_center_y - button_size.y * 0.5,
+            ),
+            button_size,
+        );
+        let play_btn_rect = egui::Rect::from_min_size(
+            egui::pos2(
+                menu_btn_rect.min.x - button_gap - button_size.x,
+                buttons_center_y - button_size.y * 0.5,
+            ),
+            button_size,
+        );
+        let play_resp = ui.interact(
+            play_btn_rect,
+            ui.id().with("now_playing_toggle"),
+            egui::Sense::click(),
+        );
+        ui.painter().text(
+            play_btn_rect.center(),
+            egui::Align2::CENTER_CENTER,
+            icon_char,
+            icon_font.clone(),
+            visuals.text_color(),
+        );
+        if play_resp.clicked() {
+            toggle = true;
+        }
+        let menu_resp = ui.interact(
+            menu_btn_rect,
+            ui.id().with("now_playing_menu"),
+            egui::Sense::click(),
+        );
+        ui.painter().text(
+            menu_btn_rect.center(),
+            egui::Align2::CENTER_CENTER,
+            menu_icon_char,
+            icon_font,
+            visuals.text_color(),
+        );
+
+        let can_next = self.next_track_info().is_some();
+        let can_locate = ct.row_index.is_some();
+        egui::Popup::menu(&menu_resp)
+            .align(egui::RectAlign::TOP_END)
+            .width(130.0)
+            .show(|ui| {
+                if menu_item(ui, egui_phosphor::fill::SKIP_FORWARD, "Next", can_next).clicked() {
+                    action = Some(MenuAction::Next);
+                }
+                if menu_item(ui, egui_phosphor::bold::X, "Close", true).clicked() {
+                    action = Some(MenuAction::Close);
+                }
+                if menu_item(ui, egui_phosphor::fill::CROSSHAIR, "Locate", can_locate).clicked() {
+                    action = Some(MenuAction::Locate);
+                }
+                let _ = menu_item(ui, egui_phosphor::fill::PENCIL, "Edit", true);
+            });
+
+        (toggle, action)
     }
 
     fn next_track_info(&self) -> Option<(usize, String)> {
@@ -885,6 +862,82 @@ enum MenuAction {
     Next,
     Close,
     Locate,
+}
+
+/// Draws the track title and artist names on the left of the now-playing bar.
+fn draw_now_playing_text(
+    ui: &egui::Ui,
+    full: egui::Rect,
+    pad_x: f32,
+    above_timeline_h: f32,
+    ct: &CurrentTrack,
+) {
+    let visuals = ui.visuals();
+    let title_font = egui::FontId::proportional(13.0);
+    let artist_font = egui::FontId::proportional(11.0);
+    let text_left = full.min.x + pad_x;
+    let title_h = 14.0;
+    let line_gap = 1.0;
+    let artist_h = 11.0;
+    let total_text_h = title_h + line_gap + artist_h;
+    let text_top = full.min.y + above_timeline_h * 0.5 - total_text_h * 0.5;
+    let title = ct.title.as_deref().unwrap_or("");
+    ui.painter().text(
+        egui::pos2(text_left, text_top),
+        egui::Align2::LEFT_TOP,
+        title,
+        title_font,
+        visuals.text_color(),
+    );
+    let artists = ct.artist_names.join(", ");
+    ui.painter().text(
+        egui::pos2(text_left, text_top + title_h + line_gap),
+        egui::Align2::LEFT_TOP,
+        artists,
+        artist_font,
+        visuals.weak_text_color(),
+    );
+}
+
+/// Draws the played/unplayed timeline pills near the bottom of the bar.
+fn draw_now_playing_timeline(
+    ui: &egui::Ui,
+    full: egui::Rect,
+    timeline_height: f32,
+    timeline_bottom_pad: f32,
+    progress: f32,
+) {
+    let timeline_pad_x = 2.0;
+    let track_rect = egui::Rect::from_min_size(
+        egui::pos2(
+            full.min.x + timeline_pad_x,
+            full.max.y - timeline_bottom_pad - timeline_height,
+        ),
+        egui::vec2(full.width() - timeline_pad_x * 2.0, timeline_height),
+    );
+    let gap = 4.0;
+    let played_w = track_rect.width() * progress;
+    let rounding = timeline_height * 0.5;
+    let unplayed_color = egui::Color32::from_rgba_unmultiplied(46, 124, 246, 70);
+
+    if played_w > 0.0 {
+        let played_rect = egui::Rect::from_min_size(
+            track_rect.min,
+            egui::vec2((played_w - gap * 0.5).max(0.0), timeline_height),
+        );
+        if played_rect.width() > 0.0 {
+            ui.painter().rect_filled(played_rect, rounding, ACCENT_BLUE);
+        }
+    }
+    let unplayed_start = track_rect.min.x + (played_w + gap * 0.5).max(0.0);
+    if unplayed_start < track_rect.max.x {
+        let unplayed_rect = egui::Rect::from_min_max(
+            egui::pos2(unplayed_start, track_rect.min.y),
+            egui::pos2(track_rect.max.x, track_rect.max.y),
+        );
+        ui.painter()
+            .rect_filled(unplayed_rect, rounding, unplayed_color);
+    }
 }
 
 fn menu_item(ui: &mut egui::Ui, icon: &str, label: &str, enabled: bool) -> egui::Response {
