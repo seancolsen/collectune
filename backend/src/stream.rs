@@ -103,13 +103,10 @@ fn lookup_track(state: &AppState, track_id: &str) -> Result<TrackFile, StatusCod
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
 
-    let (relative, format) = rows
-        .next()
-        .ok_or(StatusCode::NOT_FOUND)?
-        .map_err(|e| {
-            eprintln!("stream: row decode failed: {e}");
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+    let (relative, format) = rows.next().ok_or(StatusCode::NOT_FOUND)?.map_err(|e| {
+        eprintln!("stream: row decode failed: {e}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
 
     Ok(TrackFile {
         path: resolve_path(&state.collection_path, &relative),

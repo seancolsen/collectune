@@ -52,7 +52,11 @@ fn hash_file(path: &Path) -> Option<[u8; 32]> {
     Some(*blake3::hash(&data).as_bytes())
 }
 
-fn classify_file(path: &Path, existing: &ExistingFiles, canonical_root: &Path) -> Option<FileClassification> {
+fn classify_file(
+    path: &Path,
+    existing: &ExistingFiles,
+    canonical_root: &Path,
+) -> Option<FileClassification> {
     let path_str = normalize_path(path, canonical_root);
     let meta = fs::metadata(path).ok()?;
     let size = meta.len();
@@ -117,7 +121,12 @@ fn classify_file(path: &Path, existing: &ExistingFiles, canonical_root: &Path) -
     classify_as_new(path, path_str, hash, mtime)
 }
 
-fn classify_as_new(real_path: &Path, path_str: String, hash: [u8; 32], mtime: i64) -> Option<FileClassification> {
+fn classify_as_new(
+    real_path: &Path,
+    path_str: String,
+    hash: [u8; 32],
+    mtime: i64,
+) -> Option<FileClassification> {
     let ext = real_path.extension()?.to_str()?;
     let format = extension_to_format(ext)?;
 
@@ -222,7 +231,8 @@ pub fn detect_deletions(results: &ScanResults, existing: &ExistingFiles) -> Vec<
 
 /// Discover audio files and classify them in parallel against existing DB state.
 pub fn classify_all(collection_path: &Path, existing: &ExistingFiles) -> ScanResults {
-    let canonical_root = fs::canonicalize(collection_path).unwrap_or_else(|_| collection_path.to_path_buf());
+    let canonical_root =
+        fs::canonicalize(collection_path).unwrap_or_else(|_| collection_path.to_path_buf());
     let audio_files = get_audio_files(collection_path);
 
     let classifications: Vec<FileClassification> = audio_files
