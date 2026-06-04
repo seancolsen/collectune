@@ -6,6 +6,7 @@ use eframe::egui;
 use eframe::egui::emath::TSTransform;
 
 mod audio;
+mod compile;
 mod http;
 mod lineage;
 #[cfg(target_arch = "wasm32")]
@@ -74,6 +75,9 @@ pub struct App {
     current_track: Arc<Mutex<Option<CurrentTrack>>>,
     audio: Box<dyn AudioPlayer>,
     pending_scroll_to_row: Option<usize>,
+    /// Database schema JSON, fetched once at startup and used to compile Querydown.
+    schema: Arc<Mutex<Option<String>>>,
+    schema_fetch_started: bool,
 }
 
 impl Default for App {
@@ -92,6 +96,8 @@ impl Default for App {
             current_track: Arc::new(Mutex::new(None)),
             audio: audio::new_player(),
             pending_scroll_to_row: None,
+            schema: Arc::new(Mutex::new(None)),
+            schema_fetch_started: false,
         }
     }
 }
@@ -99,6 +105,11 @@ impl Default for App {
 impl eframe::App for App {
     #[allow(clippy::too_many_lines)]
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if !self.schema_fetch_started {
+            self.schema_fetch_started = true;
+            http::fetch_schema(Arc::clone(&self.schema), ctx.clone());
+        }
+
         let panel_fill = ctx.style().visuals.panel_fill;
 
         let (anim_target, anim_time) = if self.organizer_dragging {
@@ -525,7 +536,6 @@ impl App {
     }
 
     fn run_query(&mut self, ctx: &egui::Context) {
-        let query = self.query_text.clone();
         let state = Arc::clone(&self.state);
         let ctx = ctx.clone();
 
@@ -542,8 +552,28 @@ impl App {
             s.needs_revalidation = true;
         }
 
-        lineage::detect_track_column(query.clone(), Arc::clone(&state), ctx.clone());
-        http::run_query(query, state, ctx);
+        // Compile the user's Querydown into DuckDB SQL before running it.
+        let compiled = {
+            let schema = self.schema.lock().unwrap();
+            match schema.as_deref() {
+                Some(schema_json) => compile::querydown_to_duckdb(&self.query_text, schema_json),
+                None => Err("Schema not loaded yet. Please try again in a moment.".to_string()),
+            }
+        };
+        let sql = match compiled {
+            Ok(sql) => sql,
+            Err(e) => {
+                let mut s = state.lock().unwrap();
+                s.error = Some(e);
+                s.running = false;
+                drop(s);
+                ctx.request_repaint();
+                return;
+            }
+        };
+
+        lineage::detect_track_column(sql.clone(), Arc::clone(&state), ctx.clone());
+        http::run_query(sql, state, ctx);
     }
 
     fn play_track(&mut self, index: usize, id: String, ctx: &egui::Context) {

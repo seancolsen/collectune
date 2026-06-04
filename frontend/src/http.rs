@@ -26,6 +26,61 @@ pub(crate) fn run_query(query: String, state: Arc<Mutex<QueryState>>, ctx: egui:
     stream_query(query, handler, on_done);
 }
 
+/// Fetches the database schema JSON once at startup and stores it in `schema`.
+pub(crate) fn fetch_schema(schema: Arc<Mutex<Option<String>>>, ctx: egui::Context) {
+    let store = move |json: String| {
+        *schema.lock().unwrap() = Some(json);
+        ctx.request_repaint();
+    };
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        std::thread::spawn(move || {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("build tokio runtime");
+            if let Ok(json) = rt.block_on(fetch_schema_native()) {
+                store(json);
+            }
+        });
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        wasm_bindgen_futures::spawn_local(async move {
+            if let Ok(json) = fetch_schema_wasm().await {
+                store(json);
+            }
+        });
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+async fn fetch_schema_native() -> Result<String, String> {
+    let url = format!("{BASE}/schema");
+    let resp = reqwest::Client::new()
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !resp.status().is_success() {
+        return Err(format!("{}", resp.status()));
+    }
+    resp.text().await.map_err(|e| e.to_string())
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn fetch_schema_wasm() -> Result<String, String> {
+    let url = format!("{BASE}/schema");
+    let resp = gloo_net::http::Request::get(&url)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !resp.ok() {
+        return Err(format!("{}", resp.status()));
+    }
+    resp.text().await.map_err(|e| e.to_string())
+}
+
 pub(crate) fn fetch_track_metadata(
     track_id: String,
     current_track: Arc<Mutex<Option<CurrentTrack>>>,

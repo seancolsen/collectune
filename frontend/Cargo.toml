@@ -23,7 +23,8 @@ bytes = "1"
 eframe = "0.33"
 egui-phosphor = { version = "0.11", features = ["bold", "fill"] }
 futures-util = "0.3"
-polyglot-sql = { version = "0.4", default-features = false, features = ["semantic", "dialect-duckdb"] }
+polyglot-sql = { version = "0.4", default-features = false, features = ["semantic", "dialect-duckdb", "dialect-postgresql", "transpile"] }
+querydown = { git = "https://github.com/seancolsen/querydown", rev = "2372c14ff1652248879f0f8907dce3cad6334b64" }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 clap = { version = "4.5", features = ["derive"] }

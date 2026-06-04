@@ -3,11 +3,12 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use arrow_ipc::writer::StreamWriter;
-use axum::Router;
 use axum::body::Body;
 use axum::extract::State;
 use axum::http::{Response, StatusCode};
+use axum::response::IntoResponse;
 use axum::routing::{get, post};
+use axum::{Json, Router};
 use bytes::Bytes;
 use duckdb::Connection;
 use tokio::sync::{mpsc, oneshot};
@@ -30,6 +31,7 @@ pub fn app_state(conn: Connection, collection_path: PathBuf) -> Arc<AppState> {
 pub fn router(state: Arc<AppState>) -> Router {
     Router::new()
         .route("/query", post(query))
+        .route("/schema", get(schema))
         .route("/tracks/{id}/stream", get(crate::stream::stream_track))
         .layer(CorsLayer::permissive())
         .with_state(state)
@@ -135,6 +137,130 @@ async fn query(State(state): State<Arc<AppState>>, body: String) -> Response<Bod
             .body(Body::from("query task panicked"))
             .unwrap(),
     }
+}
+
+/// JSON schema describing the database, shaped for the Querydown compiler.
+#[derive(serde::Serialize)]
+struct SchemaJson {
+    tables: Vec<TableJson>,
+    links: Vec<LinkJson>,
+}
+
+#[derive(serde::Serialize)]
+struct TableJson {
+    name: String,
+    columns: Vec<ColumnJson>,
+}
+
+#[derive(serde::Serialize)]
+struct ColumnJson {
+    name: String,
+}
+
+#[derive(serde::Serialize)]
+struct LinkJson {
+    from: RefJson,
+    to: RefJson,
+    unique: bool,
+}
+
+#[derive(serde::Serialize)]
+struct RefJson {
+    table: String,
+    column: String,
+}
+
+/// Introspects the DuckDB database and returns its structure as Querydown schema JSON.
+///
+/// DuckDB has no foreign keys, so links are synthesized by convention: any `UUID`
+/// column whose name matches another table's name is treated as a link to that
+/// table's `id` column.
+async fn schema(State(state): State<Arc<AppState>>) -> Response<Body> {
+    let built = tokio::task::spawn_blocking(move || {
+        let conn = state.db.lock().unwrap();
+        build_schema(&conn)
+    })
+    .await;
+
+    match built {
+        Ok(Ok(schema)) => Json(schema).into_response(),
+        Ok(Err(msg)) => (StatusCode::INTERNAL_SERVER_ERROR, msg).into_response(),
+        Err(_) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "schema task panicked".to_string(),
+        )
+            .into_response(),
+    }
+}
+
+fn build_schema(conn: &Connection) -> Result<SchemaJson, String> {
+    use std::collections::{HashMap, HashSet};
+
+    let mut stmt = conn
+        .prepare(
+            "SELECT table_name FROM information_schema.tables \
+             WHERE table_schema = 'main' AND table_type = 'BASE TABLE' \
+             ORDER BY table_name",
+        )
+        .map_err(|e| e.to_string())?;
+    let table_names: Vec<String> = stmt
+        .query_map([], |row| row.get::<_, String>(0))
+        .map_err(|e| e.to_string())?
+        .collect::<Result<_, _>>()
+        .map_err(|e: duckdb::Error| e.to_string())?;
+
+    let table_set: HashSet<&str> = table_names.iter().map(String::as_str).collect();
+    let index: HashMap<&str, usize> = table_names
+        .iter()
+        .enumerate()
+        .map(|(i, n)| (n.as_str(), i))
+        .collect();
+    let mut tables: Vec<TableJson> = table_names
+        .iter()
+        .map(|name| TableJson {
+            name: name.clone(),
+            columns: Vec::new(),
+        })
+        .collect();
+
+    let mut stmt = conn
+        .prepare(
+            "SELECT table_name, column_name, data_type FROM information_schema.columns \
+             WHERE table_schema = 'main' \
+             ORDER BY table_name, ordinal_position",
+        )
+        .map_err(|e| e.to_string())?;
+    let columns: Vec<(String, String, String)> = stmt
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+        .map_err(|e| e.to_string())?
+        .collect::<Result<_, _>>()
+        .map_err(|e: duckdb::Error| e.to_string())?;
+
+    let mut links = Vec::new();
+    for (table, column, data_type) in &columns {
+        // Skip columns belonging to views or other non-base-table relations.
+        let Some(&table_index) = index.get(table.as_str()) else {
+            continue;
+        };
+        tables[table_index].columns.push(ColumnJson {
+            name: column.clone(),
+        });
+        if data_type.eq_ignore_ascii_case("UUID") && table_set.contains(column.as_str()) {
+            links.push(LinkJson {
+                from: RefJson {
+                    table: table.clone(),
+                    column: column.clone(),
+                },
+                to: RefJson {
+                    table: column.clone(),
+                    column: "id".to_string(),
+                },
+                unique: false,
+            });
+        }
+    }
+
+    Ok(SchemaJson { tables, links })
 }
 
 pub async fn serve(
