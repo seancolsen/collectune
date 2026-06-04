@@ -31,6 +31,7 @@ pub fn app_state(conn: Connection, collection_path: PathBuf) -> Arc<AppState> {
 pub fn router(state: Arc<AppState>) -> Router {
     Router::new()
         .route("/query", post(query))
+        .route("/rpc", post(crate::rpc::rpc))
         .route("/schema", get(schema))
         .route("/tracks/{id}/stream", get(crate::stream::stream_track))
         .layer(CorsLayer::permissive())

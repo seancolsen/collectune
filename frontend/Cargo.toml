@@ -23,8 +23,12 @@ bytes = "1"
 eframe = "0.33"
 egui-phosphor = { version = "0.11", features = ["bold", "fill"] }
 futures-util = "0.3"
+jiff = "0.2"
 polyglot-sql = { version = "0.4", default-features = false, features = ["semantic", "dialect-duckdb", "dialect-postgresql", "transpile"] }
 querydown = { git = "https://github.com/seancolsen/querydown", rev = "2372c14ff1652248879f0f8907dce3cad6334b64" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v4", "serde"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 clap = { version = "4.5", features = ["derive"] }
@@ -34,7 +38,9 @@ tokio = { version = "1", features = ["rt", "macros"] }
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 console_error_panic_hook = "0.1"
 gloo-net = { version = "0.6", features = ["http"] }
+jiff = { version = "0.2", features = ["js"] }
 js-sys = "0.3"
+uuid = { version = "1", features = ["js"] }
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 wasm-streams = "0.4"

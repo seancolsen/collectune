@@ -76,3 +76,12 @@ create table play (
   primary key (track, timestamp)
 );
 
+create table query (
+  id uuid primary key,
+  name text not null,
+  created_at timestamp_s not null,
+  modified_at timestamp_s not null,
+  last_play timestamp_s not null,
+  definition text -- Raw Querydown DSL code, authored by the user
+);
+

@@ -7,12 +7,13 @@ use arrow_ipc::reader::StreamDecoder;
 use bytes::Bytes;
 use eframe::egui;
 
-use crate::{CurrentTrack, QueryState};
+use crate::QueryState;
+use crate::now_playing::CurrentTrack;
 
 #[cfg(target_arch = "wasm32")]
-const BASE: &str = "/api";
+pub(crate) const BASE: &str = "/api";
 #[cfg(not(target_arch = "wasm32"))]
-const BASE: &str = "http://localhost:3000";
+pub(crate) const BASE: &str = "http://localhost:3000";
 
 pub(crate) fn run_query(query: String, state: &Arc<Mutex<QueryState>>, ctx: &egui::Context) {
     let handler = {
