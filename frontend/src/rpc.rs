@@ -65,6 +65,18 @@ pub(crate) fn record_play(id: Uuid, last_play: i64) {
     dispatch_call("query.record_play", params, |_| {});
 }
 
+/// Renames a saved query. Fire-and-forget.
+pub(crate) fn rename_query(id: Uuid, name: &str) {
+    let params = json!({ "id": id, "name": name });
+    dispatch_call("query.rename", params, |_| {});
+}
+
+/// Deletes a saved query. Fire-and-forget.
+pub(crate) fn delete_query(id: Uuid) {
+    let params = json!({ "id": id });
+    dispatch_call("query.delete", params, |_| {});
+}
+
 fn extract_result(value: &Value) -> Result<Value, String> {
     if let Some(error) = value.get("error") {
         let message = error

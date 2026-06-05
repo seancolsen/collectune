@@ -275,16 +275,32 @@ impl App {
             .align(egui::RectAlign::TOP_END)
             .width(130.0)
             .show(|ui| {
-                if menu_item(ui, egui_phosphor::fill::SKIP_FORWARD, "Next", can_next).clicked() {
+                if menu_item(
+                    ui,
+                    egui_phosphor::fill::SKIP_FORWARD,
+                    "Next",
+                    can_next,
+                    None,
+                )
+                .clicked()
+                {
                     action = Some(MenuAction::Next);
                 }
-                if menu_item(ui, egui_phosphor::bold::X, "Close", true).clicked() {
+                if menu_item(ui, egui_phosphor::bold::X, "Close", true, None).clicked() {
                     action = Some(MenuAction::Close);
                 }
-                if menu_item(ui, egui_phosphor::fill::CROSSHAIR, "Locate", can_locate).clicked() {
+                if menu_item(
+                    ui,
+                    egui_phosphor::fill::CROSSHAIR,
+                    "Locate",
+                    can_locate,
+                    None,
+                )
+                .clicked()
+                {
                     action = Some(MenuAction::Locate);
                 }
-                let _ = menu_item(ui, egui_phosphor::fill::PENCIL, "Edit", true);
+                let _ = menu_item(ui, egui_phosphor::fill::PENCIL, "Edit", true, None);
             });
 
         (toggle, action)
@@ -386,7 +402,16 @@ fn draw_now_playing_timeline(
     }
 }
 
-fn menu_item(ui: &mut egui::Ui, icon: &str, label: &str, enabled: bool) -> egui::Response {
+/// A single row in a popup/context menu: an icon, a label, and hover feedback.
+/// `tint` overrides the icon/label color when the item is enabled (e.g. red for a
+/// destructive action); disabled items always use the weak text color.
+pub(crate) fn menu_item(
+    ui: &mut egui::Ui,
+    icon: &str,
+    label: &str,
+    enabled: bool,
+    tint: Option<egui::Color32>,
+) -> egui::Response {
     let row_height = 28.0;
     let icon_size = 16.0;
     let label_size = 13.0;
@@ -405,7 +430,7 @@ fn menu_item(ui: &mut egui::Ui, icon: &str, label: &str, enabled: bool) -> egui:
     }
 
     let text_color = if enabled {
-        visuals.text_color()
+        tint.unwrap_or_else(|| visuals.text_color())
     } else {
         visuals.weak_text_color()
     };

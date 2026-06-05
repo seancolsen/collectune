@@ -63,6 +63,33 @@ pub(crate) struct QueryState {
     pub(crate) needs_revalidation: bool,
 }
 
+/// Which surface initiated an in-progress rename. Both surfaces edit the same
+/// query name, but only the initiating one renders the inline field, so the two
+/// can't fight over focus.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RenameSurface {
+    /// The query's row in the organizer sidebar.
+    Sidebar,
+    /// The query name shown in the top menu bar of the query page.
+    Page,
+}
+
+/// An in-progress inline rename of a query.
+pub(crate) struct Rename {
+    pub(crate) id: Uuid,
+    pub(crate) buffer: String,
+    pub(crate) surface: RenameSurface,
+    /// Set on the first frame so the field grabs focus and selects its text once.
+    pub(crate) take_focus: bool,
+}
+
+/// A delete awaiting confirmation in the modal dialog.
+pub(crate) struct PendingDelete {
+    pub(crate) id: Uuid,
+    pub(crate) name: String,
+    pub(crate) unsaved: bool,
+}
+
 // Several independent one-shot startup/UI flags; grouping them into a sub-struct
 // wouldn't make any of them clearer.
 #[allow(clippy::struct_excessive_bools)]
@@ -82,6 +109,10 @@ pub struct App {
     pub(crate) selection: HashSet<usize>,
     pub(crate) selection_anchor: Option<usize>,
     pub(crate) organizer: Organizer,
+    /// The in-progress inline rename, if any.
+    pub(crate) rename: Option<Rename>,
+    /// The query whose deletion is awaiting confirmation in the modal, if any.
+    pub(crate) pending_delete: Option<PendingDelete>,
     pub(crate) config_open: bool,
     pub(crate) current_track: Arc<Mutex<Option<CurrentTrack>>>,
     pub(crate) audio: Box<dyn AudioPlayer>,
@@ -103,6 +134,8 @@ impl Default for App {
             selection: HashSet::new(),
             selection_anchor: None,
             organizer: Organizer::default(),
+            rename: None,
+            pending_delete: None,
             config_open: false,
             current_track: Arc::new(Mutex::new(None)),
             audio: audio::new_player(),
@@ -154,6 +187,9 @@ impl eframe::App for App {
         if progress > 0.0 || self.organizer.dragging {
             self.render_organizer(ctx, progress, panel_fill);
         }
+
+        // The delete-confirmation modal floats above everything else.
+        self.render_delete_confirm(ctx);
     }
 }
 
@@ -277,6 +313,140 @@ impl App {
         self.current = CurrentPage::Query(id);
         self.selection.clear();
         self.selection_anchor = None;
+    }
+
+    /// Starts an inline rename of `id`, seeding the edit buffer with the current
+    /// name. `surface` records where the rename was triggered so only that
+    /// surface renders the field.
+    pub(crate) fn begin_rename(&mut self, id: Uuid, surface: RenameSurface) {
+        let Some(page) = self.pages.iter().find(|p| p.live.id == id) else {
+            return;
+        };
+        self.rename = Some(Rename {
+            id,
+            buffer: page.live.name.clone(),
+            surface,
+            take_focus: true,
+        });
+    }
+
+    /// Commits the in-progress rename. An empty/whitespace-only name is rejected
+    /// and treated as a cancel. For a persisted query the new name is pushed to
+    /// the backend immediately and mirrored into the saved snapshot, so the
+    /// rename doesn't register as an unsaved (blue-dot) change.
+    pub(crate) fn commit_rename(&mut self) {
+        let Some(state) = self.rename.take() else {
+            return;
+        };
+        let name = state.buffer.trim().to_string();
+        if name.is_empty() {
+            return;
+        }
+        let Some(page) = self.pages.iter_mut().find(|p| p.live.id == state.id) else {
+            return;
+        };
+        if page.live.name == name {
+            return;
+        }
+        page.live.name.clone_from(&name);
+        if let Some(saved) = page.saved.as_mut() {
+            saved.name.clone_from(&name);
+            rpc::rename_query(state.id, &name);
+        }
+    }
+
+    /// Abandons the in-progress rename, restoring the original name.
+    pub(crate) fn cancel_rename(&mut self) {
+        self.rename = None;
+    }
+
+    /// Opens the delete-confirmation modal for `id`.
+    pub(crate) fn request_delete(&mut self, id: Uuid) {
+        if let Some(page) = self.pages.iter().find(|p| p.live.id == id) {
+            self.pending_delete = Some(PendingDelete {
+                id,
+                name: page.live.name.clone(),
+                unsaved: page.unsaved(),
+            });
+        }
+    }
+
+    /// Deletes a query: drops its page, deletes it on the backend if it was
+    /// persisted, and — if it was the open page — navigates to the top-listed
+    /// (most-recently-created) remaining query, or the welcome page if none.
+    pub(crate) fn delete_query(&mut self, id: Uuid) {
+        let was_persisted = self
+            .pages
+            .iter()
+            .find(|p| p.live.id == id)
+            .is_some_and(QueryPage::is_persisted);
+        self.pages.retain(|p| p.live.id != id);
+        if was_persisted {
+            rpc::delete_query(id);
+        }
+        if self.rename.as_ref().is_some_and(|r| r.id == id) {
+            self.rename = None;
+        }
+        if self.current.query_id() == Some(id) {
+            self.current = self
+                .pages
+                .iter()
+                .max_by_key(|p| p.live.created_at)
+                .map_or(CurrentPage::Welcome, |p| CurrentPage::Query(p.live.id));
+            self.selection.clear();
+            self.selection_anchor = None;
+        }
+    }
+
+    /// Renders the delete-confirmation modal when a delete is pending. Confirming
+    /// performs the delete; cancelling (button, backdrop click, or Esc) dismisses.
+    pub(crate) fn render_delete_confirm(&mut self, ctx: &egui::Context) {
+        let Some(pending) = self.pending_delete.as_ref() else {
+            return;
+        };
+        let id = pending.id;
+        let name = pending.name.clone();
+        let unsaved = pending.unsaved;
+        let mut confirm = false;
+        let mut cancel = false;
+
+        let modal = egui::Modal::new(egui::Id::new("delete_query_confirm")).show(ctx, |ui| {
+            ui.set_max_width(280.0);
+            ui.heading("Delete query");
+            ui.add_space(8.0);
+            ui.label(format!("Delete \u{201c}{name}\u{201d}?"));
+            if unsaved {
+                ui.add_space(4.0);
+                ui.colored_label(ACCENT_BLUE, "This query has unsaved changes.");
+            }
+            ui.add_space(12.0);
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui
+                    .add(
+                        egui::Button::new(
+                            egui::RichText::new("Delete").color(egui::Color32::WHITE),
+                        )
+                        .fill(page::DELETE_RED),
+                    )
+                    .clicked()
+                {
+                    confirm = true;
+                }
+                if ui.button("Cancel").clicked() {
+                    cancel = true;
+                }
+            });
+        });
+
+        if modal.should_close() {
+            cancel = true;
+        }
+        if confirm {
+            self.pending_delete = None;
+            self.delete_query(id);
+        } else if cancel {
+            self.pending_delete = None;
+        }
     }
 
     /// Compiles and runs the current page's live query, replacing its results.

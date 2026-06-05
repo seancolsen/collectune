@@ -9,7 +9,88 @@ use eframe::egui;
 use uuid::Uuid;
 
 use crate::QueryState;
+use crate::now_playing::menu_item;
 use crate::rpc::Query;
+
+/// Red used for the destructive "Delete" affordances (menu item + dialog button).
+pub(crate) const DELETE_RED: egui::Color32 = egui::Color32::from_rgb(0xC0, 0x39, 0x2B);
+
+/// An action chosen from a query's Rename/Delete menu.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum QueryAction {
+    Rename,
+    Delete,
+}
+
+/// Renders the shared Rename/Delete menu body. Used both for the sidebar row's
+/// `⋮`/right-click menu and the query page's `⋮` menu, so the two stay identical.
+/// Returns the chosen action, if any.
+pub(crate) fn query_actions_menu(ui: &mut egui::Ui) -> Option<QueryAction> {
+    ui.set_width(130.0);
+    let mut action = None;
+    if menu_item(ui, egui_phosphor::fill::PENCIL, "Rename", true, None).clicked() {
+        action = Some(QueryAction::Rename);
+    }
+    if menu_item(
+        ui,
+        egui_phosphor::fill::TRASH,
+        "Delete",
+        true,
+        Some(DELETE_RED),
+    )
+    .clicked()
+    {
+        action = Some(QueryAction::Delete);
+    }
+    action
+}
+
+/// The result of a frame of inline-rename editing.
+#[derive(Default)]
+pub(crate) struct RenameOutcome {
+    pub(crate) commit: bool,
+    pub(crate) cancel: bool,
+}
+
+/// Renders an inline single-line rename field into `buffer`. On the first frame
+/// (`take_focus`) it grabs focus and selects all text. Pressing Enter or clicking
+/// away commits; pressing Escape cancels. The `id` keeps the widget's state stable
+/// across frames; `width` sizes the field.
+pub(crate) fn inline_rename_field(
+    ui: &mut egui::Ui,
+    buffer: &mut String,
+    take_focus: &mut bool,
+    id: egui::Id,
+    width: f32,
+) -> RenameOutcome {
+    let mut output = egui::TextEdit::singleline(buffer)
+        .id(id)
+        .desired_width(width)
+        .show(ui);
+
+    if *take_focus {
+        output.response.request_focus();
+        let end = buffer.chars().count();
+        let range = egui::text::CCursorRange::two(
+            egui::text::CCursor::new(0),
+            egui::text::CCursor::new(end),
+        );
+        output.state.cursor.set_char_range(Some(range));
+        output.state.store(ui.ctx(), output.response.id);
+        *take_focus = false;
+    }
+
+    let mut outcome = RenameOutcome::default();
+    // egui's TextEdit surrenders focus on Enter (→ commit) but ignores Escape, so
+    // we detect Escape ourselves and release focus to dismiss the field.
+    if output.response.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+        outcome.cancel = true;
+        ui.memory_mut(|m| m.surrender_focus(output.response.id));
+    } else if output.response.lost_focus() {
+        outcome.commit = true;
+    }
+    outcome
+}
 
 /// Which page the app is currently showing. A query page requires a concrete
 /// query id; `Welcome` is the placeholder shown when no query is open (e.g.

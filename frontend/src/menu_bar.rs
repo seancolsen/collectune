@@ -2,14 +2,18 @@
 //! the collapsible query-definition editor below it.
 
 use eframe::egui;
+use uuid::Uuid;
 
-use crate::App;
-use crate::page::{QueryPage, explorer_button};
+use crate::page::{
+    QueryAction, QueryPage, explorer_button, inline_rename_field, query_actions_menu,
+};
+use crate::{App, Rename, RenameSurface};
 
 impl App {
     pub(crate) fn render_menu_bar(&mut self, ctx: &egui::Context) {
         let panel_fill = ctx.style().visuals.panel_fill;
-        let has_page = self.current.query_id().is_some();
+        let current_id = self.current.query_id();
+        let has_page = current_id.is_some();
         let name = self
             .current_page()
             .map_or(String::new(), |p| p.live.name.clone());
@@ -23,6 +27,11 @@ impl App {
         let mut toggle_config = false;
         let mut run_now = false;
         let mut save_now = false;
+        let mut begin_rename = false;
+        let mut rename_commit = false;
+        let mut rename_cancel = false;
+        let mut menu_action = None;
+        let rename = &mut self.rename;
 
         egui::TopBottomPanel::top("menu_bar")
             .exact_height(30.0)
@@ -40,10 +49,14 @@ impl App {
                     }
                     if has_page {
                         ui.add_space(6.0);
-                        ui.label(&name);
+                        (begin_rename, rename_commit, rename_cancel) =
+                            draw_page_name(ui, &name, rename, current_id);
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.add_space(8.0);
+                        if has_page && let Some(a) = draw_page_menu_button(ui) {
+                            menu_action = Some(a);
+                        }
                         if paint_gear(ui, config_open).clicked() {
                             toggle_config = true;
                         }
@@ -64,6 +77,21 @@ impl App {
         }
         if save_now {
             self.save_current();
+        }
+        // Commit/cancel an in-progress rename before starting a new one.
+        if rename_commit {
+            self.commit_rename();
+        }
+        if rename_cancel {
+            self.cancel_rename();
+        }
+        if let Some(id) = current_id {
+            if begin_rename || menu_action == Some(QueryAction::Rename) {
+                self.begin_rename(id, RenameSurface::Page);
+            }
+            if menu_action == Some(QueryAction::Delete) {
+                self.request_delete(id);
+            }
         }
     }
 
@@ -97,6 +125,53 @@ impl App {
             self.run_query(ctx);
         }
     }
+}
+
+/// Renders the page's query name: an inline rename field when this query is being
+/// renamed from the page, otherwise a double-clickable label (double-click begins
+/// a rename). Returns `(begin_rename, rename_commit, rename_cancel)`.
+fn draw_page_name(
+    ui: &mut egui::Ui,
+    name: &str,
+    rename: &mut Option<Rename>,
+    current_id: Option<Uuid>,
+) -> (bool, bool, bool) {
+    let editing = rename
+        .as_mut()
+        .filter(|r| r.surface == RenameSurface::Page && Some(r.id) == current_id);
+    if let Some(state) = editing {
+        let res = inline_rename_field(
+            ui,
+            &mut state.buffer,
+            &mut state.take_focus,
+            egui::Id::new("page-rename"),
+            160.0,
+        );
+        (false, res.commit, res.cancel)
+    } else {
+        let begin = ui
+            .add(egui::Label::new(name).sense(egui::Sense::click()))
+            .double_clicked();
+        (begin, false, false)
+    }
+}
+
+/// The page's "⋮" actions button in the menu bar, opening the shared Rename/Delete
+/// menu for the current query. Returns the chosen action, if any.
+fn draw_page_menu_button(ui: &mut egui::Ui) -> Option<QueryAction> {
+    let dots = ui.add(
+        egui::Button::new(egui::RichText::new(egui_phosphor::bold::DOTS_THREE_VERTICAL).size(18.0))
+            .frame(false),
+    );
+    let mut action = None;
+    if let Some(inner) = egui::Popup::menu(&dots)
+        .align(egui::RectAlign::TOP_END)
+        .show(query_actions_menu)
+        && inner.inner.is_some()
+    {
+        action = inner.inner;
+    }
+    action
 }
 
 /// Paints the gear (config) toggle, manually rendered for its custom active fill.

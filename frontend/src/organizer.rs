@@ -8,8 +8,10 @@ use std::sync::Arc;
 use eframe::egui;
 use uuid::Uuid;
 
+use crate::page::{QueryAction, inline_rename_field, query_actions_menu};
 use crate::{
-    ACCENT_BLUE, App, ORGANIZER_DRAG_FRICTION, ORGANIZER_SWIPE_VELOCITY, ORGANIZER_WIDTH, rpc,
+    ACCENT_BLUE, App, ORGANIZER_DRAG_FRICTION, ORGANIZER_SWIPE_VELOCITY, ORGANIZER_WIDTH, Rename,
+    RenameSurface, rpc,
 };
 
 /// Sliding "organizer" side panel state, including the in-progress drag gesture.
@@ -31,11 +33,25 @@ struct ListItem {
 
 /// Deferred outcomes of interacting with the query list, applied after the
 /// drawer's UI closure releases its borrow of `self`.
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Default)]
 struct ListActions {
     add: bool,
     refresh: bool,
     clicked: Option<Uuid>,
+    rename_request: Option<Uuid>,
+    delete_request: Option<Uuid>,
+    rename_commit: bool,
+    rename_cancel: bool,
+}
+
+/// Per-row outcome from `query_list_widget`, folded into `ListActions`.
+#[derive(Default)]
+struct RowOutcome {
+    clicked: bool,
+    action: Option<QueryAction>,
+    rename_commit: bool,
+    rename_cancel: bool,
 }
 
 impl App {
@@ -101,15 +117,29 @@ impl App {
                 );
                 self.handle_organizer_swipe(ctx, &drag, progress);
 
-                actions = draw_query_list(ui, &items, current, &mut self.filter);
+                actions = draw_query_list(ui, &items, current, &mut self.filter, &mut self.rename);
             });
 
+        // Commit/cancel an in-progress rename before starting a new one, so
+        // clicking "Rename" on another row first saves the current edit.
+        if actions.rename_commit {
+            self.commit_rename();
+        }
+        if actions.rename_cancel {
+            self.cancel_rename();
+        }
         if actions.add {
             self.add_query_page();
         }
         if let Some(id) = actions.clicked {
             self.select_page(id);
             self.organizer.open = false;
+        }
+        if let Some(id) = actions.rename_request {
+            self.begin_rename(id, RenameSurface::Sidebar);
+        }
+        if let Some(id) = actions.delete_request {
+            self.request_delete(id);
         }
         if actions.refresh {
             rpc::list_queries(Arc::clone(&self.loaded_queries), ctx.clone());
@@ -178,6 +208,7 @@ fn draw_query_list(
     items: &[ListItem],
     current: Option<Uuid>,
     filter: &mut String,
+    rename: &mut Option<Rename>,
 ) -> ListActions {
     let mut actions = ListActions::default();
 
@@ -220,8 +251,20 @@ fn draw_query_list(
             // and leave no dead (unclickable) gap.
             ui.spacing_mut().item_spacing.y = 0.0;
             for item in items {
-                if query_list_widget(ui, item, current == Some(item.id)).clicked() {
+                let out = query_list_widget(ui, item, current == Some(item.id), rename);
+                if out.clicked {
                     actions.clicked = Some(item.id);
+                }
+                if out.rename_commit {
+                    actions.rename_commit = true;
+                }
+                if out.rename_cancel {
+                    actions.rename_cancel = true;
+                }
+                match out.action {
+                    Some(QueryAction::Rename) => actions.rename_request = Some(item.id),
+                    Some(QueryAction::Delete) => actions.delete_request = Some(item.id),
+                    None => {}
                 }
             }
         });
@@ -232,33 +275,52 @@ fn draw_query_list(
 /// A single query listing in the organizer. Spans the sidebar's full width with
 /// no dead click area, and reuses the query-result row's hover/selected styling
 /// (see `results::row_widget`) so selection looks consistent across the app.
-fn query_list_widget(ui: &mut egui::Ui, item: &ListItem, selected: bool) -> egui::Response {
+///
+/// When the row is being renamed it shows an inline edit field instead of the
+/// name; otherwise it shows a `⋮` actions button (on hover/selection) and opens
+/// the Rename/Delete menu on `⋮`-click or right-click.
+fn query_list_widget(
+    ui: &mut egui::Ui,
+    item: &ListItem,
+    selected: bool,
+    rename: &mut Option<Rename>,
+) -> RowOutcome {
+    let mut outcome = RowOutcome::default();
     let row_height = ui.text_style_height(&egui::TextStyle::Body);
     let height = row_height + 12.0;
     let desired = egui::vec2(ui.available_width(), height);
     let (rect, response) = ui.allocate_exact_size(desired, egui::Sense::click());
 
-    let visuals = ui.visuals();
+    // Capture colors up front (Color32 is Copy) so later `&mut ui` calls (interact,
+    // child UIs) don't clash with an outstanding `ui.visuals()` borrow.
+    let (sel_fill, hover_fill, sep_color, text_color, weak_text) = {
+        let v = ui.visuals();
+        (
+            v.selection.bg_fill,
+            v.widgets.hovered.weak_bg_fill,
+            v.widgets.noninteractive.bg_stroke.color,
+            v.text_color(),
+            v.weak_text_color(),
+        )
+    };
+
     if selected {
-        let base = visuals.selection.bg_fill;
         let fill = if response.hovered() {
             egui::Color32::from_rgba_unmultiplied(
-                base.r().saturating_sub(20),
-                base.g().saturating_sub(20),
-                base.b().saturating_sub(20),
-                base.a(),
+                sel_fill.r().saturating_sub(20),
+                sel_fill.g().saturating_sub(20),
+                sel_fill.b().saturating_sub(20),
+                sel_fill.a(),
             )
         } else {
-            base
+            sel_fill
         };
         ui.painter().rect_filled(rect, 0.0, fill);
     } else if response.hovered() {
-        ui.painter()
-            .rect_filled(rect, 0.0, visuals.widgets.hovered.weak_bg_fill);
+        ui.painter().rect_filled(rect, 0.0, hover_fill);
     }
 
     // Thin separator at the bottom of the row, matching the result rows.
-    let sep_color = visuals.widgets.noninteractive.bg_stroke.color;
     ui.painter().line_segment(
         [rect.left_bottom(), rect.right_bottom()],
         egui::Stroke::new(1.0, sep_color),
@@ -273,16 +335,114 @@ fn query_list_widget(ui: &mut egui::Ui, item: &ListItem, selected: bool) -> egui
         );
     }
 
+    // If this row is being renamed in the sidebar, show the inline field instead
+    // of the name (and skip the actions button / navigation for this row).
+    let editing = rename
+        .as_mut()
+        .filter(|r| r.surface == RenameSurface::Sidebar && r.id == item.id);
+    if let Some(state) = editing {
+        let field_rect = egui::Rect::from_min_max(
+            egui::pos2(rect.left() + 16.0, rect.top() + 4.0),
+            egui::pos2(rect.right() - 8.0, rect.bottom() - 4.0),
+        );
+        let builder = egui::UiBuilder::new()
+            .max_rect(field_rect)
+            .layout(egui::Layout::left_to_right(egui::Align::Center));
+        let res = ui
+            .scope_builder(builder, |ui| {
+                inline_rename_field(
+                    ui,
+                    &mut state.buffer,
+                    &mut state.take_focus,
+                    egui::Id::new(("sidebar-rename", item.id)),
+                    field_rect.width(),
+                )
+            })
+            .inner;
+        outcome.rename_commit = res.commit;
+        outcome.rename_cancel = res.cancel;
+        return outcome;
+    }
+
     let font_id = egui::TextStyle::Body.resolve(ui.style());
     ui.painter().text(
         egui::pos2(rect.left() + 20.0, rect.center().y),
         egui::Align2::LEFT_CENTER,
         &item.name,
         font_id,
-        visuals.text_color(),
+        text_color,
     );
 
-    response
+    outcome.action = row_actions_menu(
+        ui,
+        item,
+        &response,
+        rect,
+        selected || response.hovered(),
+        text_color,
+        weak_text,
+    );
+    outcome.clicked = response.clicked();
+    outcome
+}
+
+/// Draws the row's "⋮" actions button and wires up both its click-menu and the
+/// row's right-click context menu, returning the chosen action. The button is
+/// interacted every frame (a stable anchor keeps its popup open even once the row
+/// stops being hovered) but its glyph is only painted when `show_button` is set.
+/// It's interacted after the row so it sits on top and steals clicks from the
+/// row's navigation.
+fn row_actions_menu(
+    ui: &mut egui::Ui,
+    item: &ListItem,
+    row: &egui::Response,
+    rect: egui::Rect,
+    show_button: bool,
+    text_color: egui::Color32,
+    weak_text: egui::Color32,
+) -> Option<QueryAction> {
+    let btn_size = 24.0;
+    let btn_rect = egui::Rect::from_center_size(
+        egui::pos2(rect.right() - btn_size / 2.0 - 2.0, rect.center().y),
+        egui::vec2(btn_size, btn_size),
+    );
+    let btn_resp = ui.interact(
+        btn_rect,
+        egui::Id::new(("query-menu", item.id)),
+        egui::Sense::click(),
+    );
+    if show_button || btn_resp.hovered() {
+        let icon_font = egui::FontId::new(18.0, egui::FontFamily::Name("phosphor-fill".into()));
+        let icon_color = if btn_resp.hovered() {
+            text_color
+        } else {
+            weak_text
+        };
+        ui.painter().text(
+            btn_rect.center(),
+            egui::Align2::CENTER_CENTER,
+            egui_phosphor::fill::DOTS_THREE_OUTLINE_VERTICAL,
+            icon_font,
+            icon_color,
+        );
+    }
+
+    // Opened by clicking "⋮" (anchored under the button) or by right-clicking
+    // anywhere on the row (at the pointer).
+    let mut action = None;
+    if let Some(inner) = egui::Popup::menu(&btn_resp)
+        .align(egui::RectAlign::BOTTOM_END)
+        .show(query_actions_menu)
+        && inner.inner.is_some()
+    {
+        action = inner.inner;
+    }
+    if let Some(inner) = egui::Popup::context_menu(row).show(query_actions_menu)
+        && inner.inner.is_some()
+    {
+        action = inner.inner;
+    }
+    action
 }
 
 /// Models a static-friction-like resistance to drag motion: near-zero response
