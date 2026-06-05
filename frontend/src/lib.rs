@@ -15,9 +15,9 @@ mod organizer;
 mod page;
 mod results;
 mod rpc;
-mod welcome;
 #[cfg(target_arch = "wasm32")]
 mod web;
+mod welcome;
 
 use audio::AudioPlayer;
 use now_playing::CurrentTrack;
