@@ -88,16 +88,17 @@ pub(crate) async fn rpc(
 }
 
 fn dispatch(state: &AppState, method: &str, params: Value) -> Result<Value, String> {
-    let conn = state.db.lock().unwrap();
     match method {
-        "query.list" => {
-            let queries = list_queries(&conn)?;
+        "query.list" => state.read(|conn| -> Result<Value, String> {
+            let queries = list_queries(conn)?;
             serde_json::to_value(queries).map_err(|e| e.to_string())
-        }
+        }),
         "query.add" => {
             let query: Query = from_params(params)?;
-            add_query(&conn, &query)?;
-            Ok(Value::Null)
+            state.write(|conn| {
+                add_query(conn, &query)?;
+                Ok(Value::Null)
+            })
         }
         "query.delete" => {
             #[derive(Deserialize)]
@@ -105,8 +106,10 @@ fn dispatch(state: &AppState, method: &str, params: Value) -> Result<Value, Stri
                 id: String,
             }
             let p: P = from_params(params)?;
-            delete_query(&conn, &p.id)?;
-            Ok(Value::Null)
+            state.write(|conn| {
+                delete_query(conn, &p.id)?;
+                Ok(Value::Null)
+            })
         }
         "query.record_play" => {
             #[derive(Deserialize)]
@@ -115,8 +118,10 @@ fn dispatch(state: &AppState, method: &str, params: Value) -> Result<Value, Stri
                 last_play: i64,
             }
             let p: P = from_params(params)?;
-            record_play(&conn, &p.id, p.last_play)?;
-            Ok(Value::Null)
+            state.write(|conn| {
+                record_play(conn, &p.id, p.last_play)?;
+                Ok(Value::Null)
+            })
         }
         "query.rename" => {
             #[derive(Deserialize)]
@@ -125,8 +130,10 @@ fn dispatch(state: &AppState, method: &str, params: Value) -> Result<Value, Stri
                 name: String,
             }
             let p: P = from_params(params)?;
-            rename_query(&conn, &p.id, &p.name)?;
-            Ok(Value::Null)
+            state.write(|conn| {
+                rename_query(conn, &p.id, &p.name)?;
+                Ok(Value::Null)
+            })
         }
         "query.update_definition" => {
             #[derive(Deserialize)]
@@ -136,8 +143,10 @@ fn dispatch(state: &AppState, method: &str, params: Value) -> Result<Value, Stri
                 modified_at: i64,
             }
             let p: P = from_params(params)?;
-            update_definition(&conn, &p.id, &p.definition, p.modified_at)?;
-            Ok(Value::Null)
+            state.write(|conn| {
+                update_definition(conn, &p.id, &p.definition, p.modified_at)?;
+                Ok(Value::Null)
+            })
         }
         other => Err(format!("method not found: {other}")),
     }

@@ -80,32 +80,33 @@ fn resolve_path(collection_path: &Path, relative: &str) -> PathBuf {
 }
 
 fn lookup_track(state: &AppState, track_id: &str) -> Result<TrackFile, StatusCode> {
-    let conn = state.db.lock().unwrap();
-    let mut stmt = conn
-        .prepare(
-            "SELECT f.path, f.format::VARCHAR \
-             FROM track t JOIN file f ON t.file = f.id \
-             WHERE t.id = TRY_CAST(? AS UUID)",
-        )
-        .map_err(|e| {
-            eprintln!("stream: prepare failed: {e}");
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+    let (relative, format) = state.read(|conn| {
+        let mut stmt = conn
+            .prepare(
+                "SELECT f.path, f.format::VARCHAR \
+                 FROM track t JOIN file f ON t.file = f.id \
+                 WHERE t.id = TRY_CAST(? AS UUID)",
+            )
+            .map_err(|e| {
+                eprintln!("stream: prepare failed: {e}");
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?;
 
-    let mut rows = stmt
-        .query_map([track_id], |row| {
-            let relative: String = row.get(0)?;
-            let format: String = row.get(1)?;
-            Ok((relative, format))
+        let mut rows = stmt
+            .query_map([track_id], |row| {
+                let relative: String = row.get(0)?;
+                let format: String = row.get(1)?;
+                Ok((relative, format))
+            })
+            .map_err(|e| {
+                eprintln!("stream: query_map failed: {e}");
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?;
+
+        rows.next().ok_or(StatusCode::NOT_FOUND)?.map_err(|e| {
+            eprintln!("stream: row decode failed: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR
         })
-        .map_err(|e| {
-            eprintln!("stream: query_map failed: {e}");
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
-
-    let (relative, format) = rows.next().ok_or(StatusCode::NOT_FOUND)?.map_err(|e| {
-        eprintln!("stream: row decode failed: {e}");
-        StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
     Ok(TrackFile {

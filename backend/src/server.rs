@@ -16,8 +16,34 @@ use tokio_stream::wrappers::ReceiverStream;
 use tower_http::cors::CorsLayer;
 
 pub struct AppState {
-    pub db: Mutex<Connection>,
+    db: Mutex<Connection>,
     pub collection_path: PathBuf,
+}
+
+impl AppState {
+    /// Run a read-only DB operation under the connection lock.
+    pub fn read<T>(&self, f: impl FnOnce(&Connection) -> T) -> T {
+        let conn = self.db.lock().unwrap();
+        f(&conn)
+    }
+
+    /// Run a data-modifying DB operation under the lock, then `CHECKPOINT`.
+    ///
+    /// On success the WAL has been flushed to the main database file. Every
+    /// mutation must flow through this method so the checkpoint can never be
+    /// forgotten; this is why [`AppState::db`] is private.
+    ///
+    /// If the mutation succeeds but the `CHECKPOINT` fails, this returns
+    /// `Err("checkpoint failed after write: ...")`. The mutation is already
+    /// committed and durable in the WAL, so that error is not a signal to retry
+    /// the write.
+    pub fn write<T>(&self, f: impl FnOnce(&Connection) -> Result<T, String>) -> Result<T, String> {
+        let conn = self.db.lock().unwrap();
+        let value = f(&conn)?;
+        conn.execute_batch("CHECKPOINT;")
+            .map_err(|e| format!("checkpoint failed after write: {e}"))?;
+        Ok(value)
+    }
 }
 
 pub fn app_state(conn: Connection, collection_path: PathBuf) -> Arc<AppState> {
@@ -82,42 +108,42 @@ async fn query(State(state): State<Arc<AppState>>, body: String) -> Response<Bod
     let (ready_tx, ready_rx) = oneshot::channel::<Result<(), String>>();
 
     tokio::task::spawn_blocking(move || {
-        let conn = state.db.lock().unwrap();
+        state.read(|conn| {
+            let mut stmt = match conn.prepare(&body) {
+                Ok(stmt) => stmt,
+                Err(e) => {
+                    let _ = ready_tx.send(Err(e.to_string()));
+                    return;
+                }
+            };
 
-        let mut stmt = match conn.prepare(&body) {
-            Ok(stmt) => stmt,
-            Err(e) => {
-                let _ = ready_tx.send(Err(e.to_string()));
+            let batches = match stmt.query_arrow([]) {
+                Ok(b) => b,
+                Err(e) => {
+                    let _ = ready_tx.send(Err(e.to_string()));
+                    return;
+                }
+            };
+
+            let schema = batches.get_schema();
+            let _ = ready_tx.send(Ok(()));
+
+            // Past this point, errors during streaming simply truncate the
+            // response. The client will detect the missing IPC EOS marker.
+            let writer = ChannelWriter {
+                tx,
+                buf: Vec::new(),
+            };
+            let Ok(mut ipc_writer) = StreamWriter::try_new(writer, &schema) else {
                 return;
+            };
+            for batch in batches {
+                if ipc_writer.write(&batch).is_err() {
+                    return;
+                }
             }
-        };
-
-        let batches = match stmt.query_arrow([]) {
-            Ok(b) => b,
-            Err(e) => {
-                let _ = ready_tx.send(Err(e.to_string()));
-                return;
-            }
-        };
-
-        let schema = batches.get_schema();
-        let _ = ready_tx.send(Ok(()));
-
-        // Past this point, errors during streaming simply truncate the
-        // response. The client will detect the missing IPC EOS marker.
-        let writer = ChannelWriter {
-            tx,
-            buf: Vec::new(),
-        };
-        let Ok(mut ipc_writer) = StreamWriter::try_new(writer, &schema) else {
-            return;
-        };
-        for batch in batches {
-            if ipc_writer.write(&batch).is_err() {
-                return;
-            }
-        }
-        let _ = ipc_writer.finish();
+            let _ = ipc_writer.finish();
+        });
     });
 
     match ready_rx.await {
@@ -177,11 +203,7 @@ struct RefJson {
 /// column whose name matches another table's name is treated as a link to that
 /// table's `id` column.
 async fn schema(State(state): State<Arc<AppState>>) -> Response<Body> {
-    let built = tokio::task::spawn_blocking(move || {
-        let conn = state.db.lock().unwrap();
-        build_schema(&conn)
-    })
-    .await;
+    let built = tokio::task::spawn_blocking(move || state.read(build_schema)).await;
 
     match built {
         Ok(Ok(schema)) => Json(schema).into_response(),
