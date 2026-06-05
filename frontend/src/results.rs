@@ -7,12 +7,7 @@ use crate::{ACCENT_BLUE, App};
 
 impl App {
     pub(crate) fn render_results(&mut self, ctx: &egui::Context) {
-        let Some(current_id) = self.current else {
-            egui::CentralPanel::default().show(ctx, |ui| {
-                ui.centered_and_justified(|ui| {
-                    ui.weak("Select or create a query.");
-                });
-            });
+        let Some(current_id) = self.current.query_id() else {
             return;
         };
         let Some(results) = self.page_results(current_id) else {

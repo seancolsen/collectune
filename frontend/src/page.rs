@@ -5,8 +5,42 @@
 
 use std::sync::{Arc, Mutex};
 
+use eframe::egui;
+use uuid::Uuid;
+
 use crate::QueryState;
 use crate::rpc::Query;
+
+/// Which page the app is currently showing. A query page requires a concrete
+/// query id; `Welcome` is the placeholder shown when no query is open (e.g.
+/// before any query has been created).
+#[derive(Default, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CurrentPage {
+    #[default]
+    Welcome,
+    Query(Uuid),
+}
+
+impl CurrentPage {
+    /// The id of the open query, if a query page is currently showing.
+    pub(crate) fn query_id(self) -> Option<Uuid> {
+        match self {
+            CurrentPage::Query(id) => Some(id),
+            CurrentPage::Welcome => None,
+        }
+    }
+}
+
+/// Renders the explorer (organizer) toggle — the "☰" button shown at the
+/// top-left of every page. Every page type renders it by calling this one
+/// helper, which is what keeps the button identical (look and behaviour)
+/// across page types. Returns `true` when clicked.
+pub(crate) fn explorer_button(ui: &mut egui::Ui) -> bool {
+    ui.add(
+        egui::Button::new(egui::RichText::new(egui_phosphor::bold::LIST).size(18.0)).frame(false),
+    )
+    .clicked()
+}
 
 /// A single query page: an editable `live` query plus the `saved` snapshot it was
 /// last persisted from, and a cache of its results.

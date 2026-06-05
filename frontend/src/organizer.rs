@@ -70,7 +70,7 @@ impl App {
         let organizer_x = organizer_offset - ORGANIZER_WIDTH;
         let screen_height = viewport.height();
         let items = self.visible_items();
-        let current = self.current;
+        let current = self.current.query_id();
         let mut actions = ListActions::default();
 
         egui::Area::new(egui::Id::new("organizer"))
@@ -109,6 +109,7 @@ impl App {
         }
         if let Some(id) = actions.clicked {
             self.select_page(id);
+            self.organizer.open = false;
         }
         if actions.refresh {
             rpc::list_queries(Arc::clone(&self.loaded_queries), ctx.clone());
@@ -215,25 +216,73 @@ fn draw_query_list(
     egui::ScrollArea::vertical()
         .auto_shrink([false, false])
         .show(ui, |ui| {
+            // No vertical spacing between rows so adjacent listings butt together
+            // and leave no dead (unclickable) gap.
+            ui.spacing_mut().item_spacing.y = 0.0;
             for item in items {
-                ui.horizontal(|ui| {
-                    ui.add_space(8.0);
-                    if item.unsaved {
-                        ui.colored_label(ACCENT_BLUE, egui::RichText::new("●").size(10.0));
-                    } else {
-                        ui.add_space(12.0);
-                    }
-                    if ui
-                        .selectable_label(current == Some(item.id), item.name.as_str())
-                        .clicked()
-                    {
-                        actions.clicked = Some(item.id);
-                    }
-                });
+                if query_list_widget(ui, item, current == Some(item.id)).clicked() {
+                    actions.clicked = Some(item.id);
+                }
             }
         });
 
     actions
+}
+
+/// A single query listing in the organizer. Spans the sidebar's full width with
+/// no dead click area, and reuses the query-result row's hover/selected styling
+/// (see `results::row_widget`) so selection looks consistent across the app.
+fn query_list_widget(ui: &mut egui::Ui, item: &ListItem, selected: bool) -> egui::Response {
+    let row_height = ui.text_style_height(&egui::TextStyle::Body);
+    let height = row_height + 12.0;
+    let desired = egui::vec2(ui.available_width(), height);
+    let (rect, response) = ui.allocate_exact_size(desired, egui::Sense::click());
+
+    let visuals = ui.visuals();
+    if selected {
+        let base = visuals.selection.bg_fill;
+        let fill = if response.hovered() {
+            egui::Color32::from_rgba_unmultiplied(
+                base.r().saturating_sub(20),
+                base.g().saturating_sub(20),
+                base.b().saturating_sub(20),
+                base.a(),
+            )
+        } else {
+            base
+        };
+        ui.painter().rect_filled(rect, 0.0, fill);
+    } else if response.hovered() {
+        ui.painter()
+            .rect_filled(rect, 0.0, visuals.widgets.hovered.weak_bg_fill);
+    }
+
+    // Thin separator at the bottom of the row, matching the result rows.
+    let sep_color = visuals.widgets.noninteractive.bg_stroke.color;
+    ui.painter().line_segment(
+        [rect.left_bottom(), rect.right_bottom()],
+        egui::Stroke::new(1.0, sep_color),
+    );
+
+    // Unsaved-changes dot, drawn in the left gutter.
+    if item.unsaved {
+        ui.painter().circle_filled(
+            egui::pos2(rect.left() + 12.0, rect.center().y),
+            3.0,
+            ACCENT_BLUE,
+        );
+    }
+
+    let font_id = egui::TextStyle::Body.resolve(ui.style());
+    ui.painter().text(
+        egui::pos2(rect.left() + 20.0, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        &item.name,
+        font_id,
+        visuals.text_color(),
+    );
+
+    response
 }
 
 /// Models a static-friction-like resistance to drag motion: near-zero response

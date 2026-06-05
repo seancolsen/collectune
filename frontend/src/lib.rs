@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
 use eframe::egui;
@@ -15,13 +15,14 @@ mod organizer;
 mod page;
 mod results;
 mod rpc;
+mod welcome;
 #[cfg(target_arch = "wasm32")]
 mod web;
 
 use audio::AudioPlayer;
 use now_playing::CurrentTrack;
 use organizer::Organizer;
-use page::QueryPage;
+use page::{CurrentPage, QueryPage};
 
 pub(crate) const ORGANIZER_WIDTH: f32 = 200.0;
 const ORGANIZER_ANIM_TIME: f32 = 0.1;
@@ -62,11 +63,17 @@ pub(crate) struct QueryState {
     pub(crate) needs_revalidation: bool,
 }
 
+// Several independent one-shot startup/UI flags; grouping them into a sub-struct
+// wouldn't make any of them clearer.
+#[allow(clippy::struct_excessive_bools)]
 pub struct App {
     /// All open query pages. The organizer is a switcher over these.
     pub(crate) pages: Vec<QueryPage>,
-    /// Id of the currently displayed page, if any.
-    pub(crate) current: Option<Uuid>,
+    /// The currently displayed page.
+    pub(crate) current: CurrentPage,
+    /// Whether the one-time, on-open auto-selection of the most-recent query has
+    /// happened yet. Keeps later list refreshes from hijacking the current page.
+    pub(crate) auto_selected_initial: bool,
     /// Organizer name filter (in-memory only; issues no requests).
     pub(crate) filter: String,
     /// Inbox for an in-flight `query.list`; drained into `pages` on the next frame.
@@ -88,7 +95,8 @@ impl Default for App {
     fn default() -> Self {
         Self {
             pages: Vec::new(),
-            current: None,
+            current: CurrentPage::default(),
+            auto_selected_initial: false,
             filter: String::new(),
             loaded_queries: Arc::new(Mutex::new(None)),
             queries_fetch_started: false,
@@ -116,13 +124,25 @@ impl eframe::App for App {
 
         self.ensure_current_results(ctx);
 
-        self.render_menu_bar(ctx);
-        if self.config_open {
-            self.render_config_panel(ctx);
+        // Top panels: each page type renders its own bar (including the explorer
+        // button). Top/bottom panels must be added before the central panel.
+        match self.current {
+            CurrentPage::Query(_) => {
+                self.render_menu_bar(ctx);
+                if self.config_open {
+                    self.render_config_panel(ctx);
+                }
+            }
+            CurrentPage::Welcome => self.render_welcome_bar(ctx),
         }
         self.render_now_playing(ctx);
         self.maybe_revalidate_current_track_index();
-        self.render_results(ctx);
+
+        // Central panel.
+        match self.current {
+            CurrentPage::Query(_) => self.render_results(ctx),
+            CurrentPage::Welcome => welcome::render_welcome_center(ctx),
+        }
 
         ctx.set_transform_layer(
             egui::LayerId::background(),
@@ -150,17 +170,44 @@ impl App {
         }
     }
 
-    /// If a `query.list` response has arrived, fully reset `pages` from it.
-    /// This wipes out never-saved ephemeral pages and any unsaved edits.
+    /// If a `query.list` response has arrived, rebuild `pages` from it. This wipes
+    /// out never-saved ephemeral pages and any unsaved edits, but carries over the
+    /// cached results (and their fetched flag) for queries that still exist, so a
+    /// list refresh doesn't re-run the current page's query.
     fn drain_loaded_queries(&mut self) {
         let Some(list) = self.loaded_queries.lock().unwrap().take() else {
             return;
         };
-        self.pages = list.into_iter().map(QueryPage::persisted).collect();
-        if let Some(cur) = self.current
+        let mut prior: HashMap<Uuid, (Arc<Mutex<QueryState>>, bool)> = self
+            .pages
+            .drain(..)
+            .map(|p| (p.live.id, (p.results, p.results_fetched)))
+            .collect();
+        self.pages = list
+            .into_iter()
+            .map(|q| {
+                let mut page = QueryPage::persisted(q);
+                if let Some((results, fetched)) = prior.remove(&page.live.id) {
+                    page.results = results;
+                    page.results_fetched = fetched;
+                }
+                page
+            })
+            .collect();
+
+        if !self.auto_selected_initial {
+            // On first load, open the most-recently-created query (or the welcome
+            // page if there are none yet).
+            self.auto_selected_initial = true;
+            self.current = self
+                .pages
+                .iter()
+                .max_by_key(|p| p.live.created_at)
+                .map_or(CurrentPage::Welcome, |p| CurrentPage::Query(p.live.id));
+        } else if let CurrentPage::Query(cur) = self.current
             && !self.pages.iter().any(|p| p.live.id == cur)
         {
-            self.current = None;
+            self.current = CurrentPage::Welcome;
         }
         self.selection.clear();
         self.selection_anchor = None;
@@ -183,21 +230,23 @@ impl App {
         if self.schema.lock().unwrap().is_none() {
             return;
         }
-        let needs = self
-            .current_page()
-            .is_some_and(|page| !page.results_fetched && !page.results.lock().unwrap().running);
+        let needs = self.current_page().is_some_and(|page| {
+            !page.results_fetched
+                && !page.live.definition.trim().is_empty()
+                && !page.results.lock().unwrap().running
+        });
         if needs {
             self.run_query(ctx);
         }
     }
 
     pub(crate) fn current_page(&self) -> Option<&QueryPage> {
-        let id = self.current?;
+        let id = self.current.query_id()?;
         self.pages.iter().find(|p| p.live.id == id)
     }
 
     pub(crate) fn current_page_mut(&mut self) -> Option<&mut QueryPage> {
-        let id = self.current?;
+        let id = self.current.query_id()?;
         self.pages.iter_mut().find(|p| p.live.id == id)
     }
 
@@ -225,7 +274,7 @@ impl App {
     }
 
     pub(crate) fn select_page(&mut self, id: Uuid) {
-        self.current = Some(id);
+        self.current = CurrentPage::Query(id);
         self.selection.clear();
         self.selection_anchor = None;
     }

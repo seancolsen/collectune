@@ -71,7 +71,7 @@ impl App {
             Some(MenuAction::Locate) => {
                 if let Some(idx) = ct.row_index {
                     // Switch to the page the track lives on, then scroll to it.
-                    self.current = Some(ct.source_page);
+                    self.current = crate::CurrentPage::Query(ct.source_page);
                     self.pending_scroll_to_row = Some(idx);
                     ctx.request_repaint();
                 }

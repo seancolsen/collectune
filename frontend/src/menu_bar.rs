@@ -4,12 +4,12 @@
 use eframe::egui;
 
 use crate::App;
-use crate::page::QueryPage;
+use crate::page::{QueryPage, explorer_button};
 
 impl App {
     pub(crate) fn render_menu_bar(&mut self, ctx: &egui::Context) {
         let panel_fill = ctx.style().visuals.panel_fill;
-        let has_page = self.current.is_some();
+        let has_page = self.current.query_id().is_some();
         let name = self
             .current_page()
             .map_or(String::new(), |p| p.live.name.clone());
@@ -35,15 +35,7 @@ impl App {
             .show(ctx, |ui| {
                 ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
                     ui.add_space(8.0);
-                    if ui
-                        .add(
-                            egui::Button::new(
-                                egui::RichText::new(egui_phosphor::bold::LIST).size(18.0),
-                            )
-                            .frame(false),
-                        )
-                        .clicked()
-                    {
+                    if explorer_button(ui) {
                         toggle_organizer = true;
                     }
                     if has_page {
