@@ -84,6 +84,12 @@ impl App {
                     egui::vec2(ORGANIZER_WIDTH, screen_height),
                 );
                 ui.set_min_size(egui::vec2(ORGANIZER_WIDTH, screen_height));
+                // Cap the width so inner right-to-left layouts (e.g. the header's
+                // "+" button) align to the sidebar's edge rather than the
+                // viewport's. Without this the Area also expands its interactive
+                // rect across the whole main area, swallowing the scrim's
+                // click/swipe-to-close.
+                ui.set_max_width(ORGANIZER_WIDTH);
                 ui.painter().rect_filled(frame_rect, 0.0, panel_fill);
 
                 // Low-priority swipe target underneath the controls, so taps on
