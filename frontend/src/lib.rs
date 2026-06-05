@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
 use eframe::egui;
@@ -6,7 +7,9 @@ use eframe::egui::emath::TSTransform;
 use uuid::Uuid;
 
 mod audio;
+mod columns;
 mod compile;
+mod field_layout;
 mod http;
 mod lineage;
 mod menu_bar;
@@ -20,6 +23,8 @@ mod web;
 mod welcome;
 
 use audio::AudioPlayer;
+use columns::ColumnMetadata;
+use field_layout::FieldLayout;
 use now_playing::CurrentTrack;
 use organizer::Organizer;
 use page::{CurrentPage, QueryPage};
@@ -56,6 +61,9 @@ pub fn setup_fonts(ctx: &egui::Context) {
 #[derive(Default)]
 pub(crate) struct QueryState {
     pub(crate) rows: Vec<Vec<String>>,
+    /// Resolved display metadata for each result column, positionally aligned with each
+    /// row's cells. Empty until the query is (re)compiled.
+    pub(crate) columns: Vec<ColumnMetadata>,
     pub(crate) error: Option<String>,
     pub(crate) running: bool,
     pub(crate) track_id_column: Option<usize>,
@@ -120,6 +128,9 @@ pub struct App {
     /// Database schema JSON, fetched once at startup and used to compile Querydown.
     pub(crate) schema: Arc<Mutex<Option<String>>>,
     pub(crate) schema_fetch_started: bool,
+    /// Memoized result-row field layout, reused across rows and frames until the column
+    /// set or available width changes.
+    pub(crate) field_layout_cache: Option<(field_layout::LayoutKey, Rc<FieldLayout>)>,
 }
 
 impl Default for App {
@@ -142,6 +153,7 @@ impl Default for App {
             pending_scroll_to_row: None,
             schema: Arc::new(Mutex::new(None)),
             schema_fetch_started: false,
+            field_layout_cache: None,
         }
     }
 }
@@ -468,6 +480,7 @@ impl App {
         {
             let mut s = results.lock().unwrap();
             s.rows.clear();
+            s.columns.clear();
             s.error = None;
             s.running = true;
             s.track_id_column = None;
@@ -484,7 +497,11 @@ impl App {
             }
         };
         let sql = match compiled {
-            Ok(sql) => sql,
+            Ok(compiled) => {
+                let mut s = results.lock().unwrap();
+                s.columns = compiled.columns;
+                compiled.sql
+            }
             Err(e) => {
                 let mut s = results.lock().unwrap();
                 s.error = Some(e);
