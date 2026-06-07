@@ -8,6 +8,8 @@
 use querydown::MetaValue;
 use serde::Deserialize;
 
+use crate::format::Formatter;
+
 /// Default column min width, in pixels, when none is specified.
 const DEFAULT_MIN_WIDTH: f32 = 0.0;
 /// Default column max width, in pixels, when none is specified.
@@ -50,6 +52,7 @@ pub(crate) struct ColumnMetadata {
     pub(crate) text_align: TextAlign,
     pub(crate) prefix: String,
     pub(crate) suffix: String,
+    pub(crate) formatter: Option<Formatter>,
 }
 
 impl Default for ColumnMetadata {
@@ -63,6 +66,7 @@ impl Default for ColumnMetadata {
             text_align: TextAlign::default(),
             prefix: String::new(),
             suffix: String::new(),
+            formatter: None,
         }
     }
 }
@@ -86,6 +90,9 @@ struct RawColumnMetadata {
     align: Option<String>,
     prefix: Option<String>,
     suffix: Option<String>,
+    /// Kept as a raw JSON value and parsed separately so a malformed formatter blob
+    /// yields `None` instead of discarding the whole column's metadata.
+    formatter: Option<serde_json::Value>,
 }
 
 /// Resolves a [`WidthSpec`] into a `(min_width, max_width)` pair, applying the rules:
@@ -148,6 +155,9 @@ impl ColumnMetadata {
             text_align: resolve_text_align(raw.align.as_deref()),
             prefix: raw.prefix.unwrap_or_default(),
             suffix: raw.suffix.unwrap_or_default(),
+            formatter: raw
+                .formatter
+                .and_then(|v| serde_json::from_value::<Formatter>(v).ok()),
         }
     }
 }
@@ -251,6 +261,30 @@ mod tests {
         )]);
         let m = ColumnMetadata::from_meta(Some(&meta));
         assert_eq!((m.min_width, m.max_width), (50.0, 300.0));
+    }
+
+    #[test]
+    fn parses_formatter_blob() {
+        let meta = object(vec![(
+            "formatter",
+            object(vec![("type", MetaValue::String("duration".to_string()))]),
+        )]);
+        let m = ColumnMetadata::from_meta(Some(&meta));
+        assert_eq!(m.formatter, Some(Formatter::Duration {}));
+    }
+
+    #[test]
+    fn unknown_formatter_type_is_ignored_without_disturbing_other_fields() {
+        let meta = object(vec![
+            ("align", MetaValue::String("right".to_string())),
+            (
+                "formatter",
+                object(vec![("type", MetaValue::String("bogus".to_string()))]),
+            ),
+        ]);
+        let m = ColumnMetadata::from_meta(Some(&meta));
+        assert_eq!(m.formatter, None);
+        assert_eq!(m.text_align, TextAlign::Right);
     }
 
     #[test]

@@ -293,10 +293,14 @@ fn draw_row(
     for (vis_idx, (col_idx, meta)) in layout.visible.iter().enumerate() {
         let placement = layout.placements[vis_idx];
         let value = cells.get(*col_idx).map_or("", String::as_str);
+        let formatted = match &meta.formatter {
+            Some(f) => f.format(value).unwrap_or_else(|| value.to_string()),
+            None => value.to_string(),
+        };
         let text = if meta.prefix.is_empty() && meta.suffix.is_empty() {
-            value.to_string()
+            formatted
         } else {
-            format!("{}{}{}", meta.prefix, value, meta.suffix)
+            format!("{}{}{}", meta.prefix, formatted, meta.suffix)
         };
 
         let font = match meta.font_size {

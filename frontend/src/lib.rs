@@ -10,6 +10,7 @@ mod audio;
 mod columns;
 mod compile;
 mod field_layout;
+mod format;
 mod http;
 mod lineage;
 mod menu_bar;
