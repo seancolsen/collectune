@@ -120,6 +120,44 @@ impl App {
                 actions = draw_query_list(ui, &items, current, &mut self.filter, &mut self.rename);
             });
 
+        // Selecting a query closes the modal drawer (it overlays the content);
+        // the persistent panel stays open.
+        self.apply_list_actions(ctx, &actions, true);
+    }
+
+    /// Renders the organizer as a persistent left panel for wide screens. Unlike
+    /// the modal drawer it reserves real layout space (the rest of the app lays
+    /// out beside it), has no scrim or swipe-to-close, and stays open across
+    /// selections — only the explorer button toggles it.
+    pub(crate) fn render_persistent_organizer(
+        &mut self,
+        ctx: &egui::Context,
+        panel_fill: egui::Color32,
+    ) {
+        let items = self.visible_items();
+        let current = self.current.query_id();
+        let mut actions = ListActions::default();
+
+        egui::SidePanel::left("organizer_panel")
+            .exact_width(ORGANIZER_WIDTH)
+            .resizable(false)
+            .frame(egui::Frame::new().fill(panel_fill))
+            .show_animated(ctx, self.organizer.open, |ui| {
+                actions = draw_query_list(ui, &items, current, &mut self.filter, &mut self.rename);
+            });
+
+        self.apply_list_actions(ctx, &actions, false);
+    }
+
+    /// Applies the deferred outcomes of interacting with the query list, shared by
+    /// the modal drawer and the persistent panel. `close_on_select` closes the
+    /// organizer after navigating to a query (used by the modal drawer only).
+    fn apply_list_actions(
+        &mut self,
+        ctx: &egui::Context,
+        actions: &ListActions,
+        close_on_select: bool,
+    ) {
         // Commit/cancel an in-progress rename before starting a new one, so
         // clicking "Rename" on another row first saves the current edit.
         if actions.rename_commit {
@@ -133,7 +171,9 @@ impl App {
         }
         if let Some(id) = actions.clicked {
             self.select_page(id);
-            self.organizer.open = false;
+            if close_on_select {
+                self.organizer.open = false;
+            }
         }
         if let Some(id) = actions.rename_request {
             self.begin_rename(id, RenameSurface::Sidebar);

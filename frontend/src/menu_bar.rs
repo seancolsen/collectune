@@ -22,6 +22,7 @@ impl App {
             .is_some_and(|p| p.results.lock().unwrap().running);
         let unsaved = self.current_page().is_some_and(QueryPage::unsaved);
         let config_open = self.config_open;
+        let organizer_open = self.organizer.open;
 
         let mut toggle_organizer = false;
         let mut toggle_config = false;
@@ -44,7 +45,7 @@ impl App {
             .show(ctx, |ui| {
                 ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
                     ui.add_space(8.0);
-                    if explorer_button(ui) {
+                    if explorer_button(ui, organizer_open) {
                         toggle_organizer = true;
                     }
                     if has_page {

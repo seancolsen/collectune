@@ -115,12 +115,33 @@ impl CurrentPage {
 /// Renders the explorer (organizer) toggle — the "☰" button shown at the
 /// top-left of every page. Every page type renders it by calling this one
 /// helper, which is what keeps the button identical (look and behaviour)
-/// across page types. Returns `true` when clicked.
-pub(crate) fn explorer_button(ui: &mut egui::Ui) -> bool {
-    ui.add(
-        egui::Button::new(egui::RichText::new(egui_phosphor::bold::LIST).size(18.0)).frame(false),
-    )
-    .clicked()
+/// across page types. When `active` (the organizer is open) it gets a dark
+/// filled background with a light glyph, mirroring the gear's active state.
+/// Returns `true` when clicked.
+pub(crate) fn explorer_button(ui: &mut egui::Ui, active: bool) -> bool {
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(26.0, 26.0), egui::Sense::click());
+    if ui.is_rect_visible(rect) {
+        if active {
+            ui.painter()
+                .rect_filled(rect, 4.0, ui.visuals().text_color());
+        } else if resp.hovered() {
+            ui.painter()
+                .rect_filled(rect, 4.0, ui.visuals().widgets.hovered.weak_bg_fill);
+        }
+        let icon_color = if active {
+            egui::Color32::WHITE
+        } else {
+            ui.visuals().text_color()
+        };
+        ui.painter().text(
+            rect.center(),
+            egui::Align2::CENTER_CENTER,
+            egui_phosphor::bold::LIST,
+            egui::FontId::new(18.0, egui::FontFamily::Proportional),
+            icon_color,
+        );
+    }
+    resp.clicked()
 }
 
 /// A single query page: an editable `live` query plus the `saved` snapshot it was

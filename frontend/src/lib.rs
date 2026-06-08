@@ -32,6 +32,9 @@ use page::{CurrentPage, QueryPage};
 
 pub(crate) const ORGANIZER_WIDTH: f32 = 200.0;
 const ORGANIZER_ANIM_TIME: f32 = 0.1;
+/// At or above this viewport width the organizer becomes a persistent left panel
+/// (reserving its own space) instead of a modal drawer that overlays the content.
+pub(crate) const PERSISTENT_ORGANIZER_MIN_WIDTH: f32 = 500.0;
 /// Leftward pointer velocity (px/s) that counts as a swipe-to-close flick,
 /// even if the cumulative drag distance is small.
 pub(crate) const ORGANIZER_SWIPE_VELOCITY: f32 = 400.0;
@@ -165,10 +168,16 @@ impl eframe::App for App {
         self.drain_loaded_queries();
 
         let panel_fill = ctx.style().visuals.panel_fill;
-        let progress = self.organizer_progress(ctx);
-        let organizer_offset = progress * ORGANIZER_WIDTH;
+        let persistent = ctx.viewport_rect().width() >= PERSISTENT_ORGANIZER_MIN_WIDTH;
 
         self.ensure_current_results(ctx);
+
+        // On wide screens the organizer is a persistent left panel that reserves
+        // its own space, so it must be added before the top/central panels for
+        // them to lay out in the remaining area.
+        if persistent {
+            self.render_persistent_organizer(ctx, panel_fill);
+        }
 
         // Top panels: each page type renders its own bar (including the explorer
         // button). Top/bottom panels must be added before the central panel.
@@ -190,15 +199,26 @@ impl eframe::App for App {
             CurrentPage::Welcome => welcome::render_welcome_center(ctx),
         }
 
-        ctx.set_transform_layer(
-            egui::LayerId::background(),
-            TSTransform::from_translation(egui::vec2(organizer_offset, 0.0)),
-        );
+        if persistent {
+            // The persistent panel reserves real layout space, so the content
+            // mustn't also be slid aside by the modal drawer's transform.
+            ctx.set_transform_layer(egui::LayerId::background(), TSTransform::IDENTITY);
+        } else {
+            // On narrow screens the organizer is a modal drawer that slides over
+            // the content (with a dimming scrim and swipe-to-close), pushing the
+            // background layer aside as it opens.
+            let progress = self.organizer_progress(ctx);
+            let organizer_offset = progress * ORGANIZER_WIDTH;
+            ctx.set_transform_layer(
+                egui::LayerId::background(),
+                TSTransform::from_translation(egui::vec2(organizer_offset, 0.0)),
+            );
 
-        // Render while dragging even at progress == 0 so the widget that owns
-        // the in-flight drag stays mounted and `drag_stopped` fires on release.
-        if progress > 0.0 || self.organizer.dragging {
-            self.render_organizer(ctx, progress, panel_fill);
+            // Render while dragging even at progress == 0 so the widget that owns
+            // the in-flight drag stays mounted and `drag_stopped` fires on release.
+            if progress > 0.0 || self.organizer.dragging {
+                self.render_organizer(ctx, progress, panel_fill);
+            }
         }
 
         // The delete-confirmation modal floats above everything else.

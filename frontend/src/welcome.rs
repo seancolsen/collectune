@@ -12,6 +12,7 @@ impl App {
     /// to every other page's via the shared [`explorer_button`] helper.
     pub(crate) fn render_welcome_bar(&mut self, ctx: &egui::Context) {
         let panel_fill = ctx.style().visuals.panel_fill;
+        let organizer_open = self.organizer.open;
         let mut toggle_organizer = false;
 
         egui::TopBottomPanel::top("menu_bar")
@@ -25,7 +26,7 @@ impl App {
             .show(ctx, |ui| {
                 ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
                     ui.add_space(8.0);
-                    if explorer_button(ui) {
+                    if explorer_button(ui, organizer_open) {
                         toggle_organizer = true;
                     }
                 });
