@@ -22,6 +22,7 @@ RUN apt-get update \
         curl \
         ca-certificates \
         pkg-config \
+        cmake \
         sudo \
     && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
