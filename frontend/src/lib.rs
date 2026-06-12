@@ -7,6 +7,7 @@ use eframe::egui::emath::TSTransform;
 use uuid::Uuid;
 
 mod audio;
+mod builder;
 mod columns;
 mod compile;
 mod field_layout;
@@ -17,6 +18,7 @@ mod menu_bar;
 mod now_playing;
 mod organizer;
 mod page;
+mod query_def;
 mod results;
 mod rpc;
 #[cfg(target_arch = "wasm32")]
@@ -24,11 +26,13 @@ mod web;
 mod welcome;
 
 use audio::AudioPlayer;
+use builder::{ManageScope, PresetEdit, PresetSave};
 use columns::ColumnMetadata;
 use field_layout::FieldLayout;
 use now_playing::CurrentTrack;
 use organizer::Organizer;
 use page::{CurrentPage, QueryPage};
+use query_def::{QueryDefinition, Section};
 
 pub(crate) const ORGANIZER_WIDTH: f32 = 200.0;
 const ORGANIZER_ANIM_TIME: f32 = 0.1;
@@ -125,7 +129,22 @@ pub struct App {
     pub(crate) rename: Option<Rename>,
     /// The query whose deletion is awaiting confirmation in the modal, if any.
     pub(crate) pending_delete: Option<PendingDelete>,
-    pub(crate) config_open: bool,
+    /// Which query-builder section (filter/sort/display) is open, if any.
+    pub(crate) builder_section: Option<Section>,
+    /// The section restored when the narrow-screen wrench re-opens the builder.
+    pub(crate) last_builder_section: Section,
+    /// All saved presets (every table and section), fetched at startup and kept
+    /// in sync locally as the user adds/edits/deletes them.
+    pub(crate) presets: Vec<rpc::Preset>,
+    /// Inbox for an in-flight `preset.list`; drained into `presets` on the next frame.
+    pub(crate) loaded_presets: Arc<Mutex<Option<Vec<rpc::Preset>>>>,
+    pub(crate) presets_fetch_started: bool,
+    /// The in-progress "save as preset" naming dialog, if any.
+    pub(crate) preset_save: Option<PresetSave>,
+    /// The in-progress inline preset edit, if any.
+    pub(crate) preset_edit: Option<PresetEdit>,
+    /// Scope of the open manage-presets modal, if any.
+    pub(crate) manage_presets: Option<ManageScope>,
     pub(crate) current_track: Arc<Mutex<Option<CurrentTrack>>>,
     pub(crate) audio: Box<dyn AudioPlayer>,
     pub(crate) pending_scroll_to_row: Option<usize>,
@@ -151,7 +170,14 @@ impl Default for App {
             organizer: Organizer::default(),
             rename: None,
             pending_delete: None,
-            config_open: false,
+            builder_section: None,
+            last_builder_section: Section::Filter,
+            presets: Vec::new(),
+            loaded_presets: Arc::new(Mutex::new(None)),
+            presets_fetch_started: false,
+            preset_save: None,
+            preset_edit: None,
+            manage_presets: None,
             current_track: Arc::new(Mutex::new(None)),
             audio: audio::new_player(),
             pending_scroll_to_row: None,
@@ -166,6 +192,7 @@ impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.bootstrap(ctx);
         self.drain_loaded_queries();
+        self.drain_loaded_presets();
 
         let panel_fill = ctx.style().visuals.panel_fill;
         let persistent = ctx.viewport_rect().width() >= PERSISTENT_ORGANIZER_MIN_WIDTH;
@@ -184,8 +211,8 @@ impl eframe::App for App {
         match self.current {
             CurrentPage::Query(_) => {
                 self.render_menu_bar(ctx);
-                if self.config_open {
-                    self.render_config_panel(ctx);
+                if self.builder_section.is_some() {
+                    self.render_builder_panel(ctx);
                 }
             }
             CurrentPage::Welcome => self.render_welcome_bar(ctx),
@@ -221,8 +248,10 @@ impl eframe::App for App {
             }
         }
 
-        // The delete-confirmation modal floats above everything else.
+        // Modals float above everything else.
         self.render_delete_confirm(ctx);
+        self.render_preset_save_modal(ctx);
+        self.render_manage_presets_modal(ctx);
     }
 }
 
@@ -236,6 +265,17 @@ impl App {
         if !self.queries_fetch_started {
             self.queries_fetch_started = true;
             rpc::list_queries(Arc::clone(&self.loaded_queries), ctx.clone());
+        }
+        if !self.presets_fetch_started {
+            self.presets_fetch_started = true;
+            rpc::list_presets(Arc::clone(&self.loaded_presets), ctx.clone());
+        }
+    }
+
+    /// If a `preset.list` response has arrived, replace the local preset list.
+    fn drain_loaded_presets(&mut self) {
+        if let Some(list) = self.loaded_presets.lock().unwrap().take() {
+            self.presets = list;
         }
     }
 
@@ -301,7 +341,7 @@ impl App {
         }
         let needs = self.current_page().is_some_and(|page| {
             !page.results_fetched
-                && !page.live.definition.trim().is_empty()
+                && page.live.definition.is_runnable()
                 && !page.results.lock().unwrap().running
         });
         if needs {
@@ -335,7 +375,7 @@ impl App {
             created_at: now,
             modified_at: now,
             last_play: now,
-            definition: String::new(),
+            definition: QueryDefinition::default(),
         };
         let id = query.id;
         self.pages.push(QueryPage::ephemeral(query));
@@ -509,12 +549,18 @@ impl App {
             s.needs_revalidation = true;
         }
 
-        // Compile the user's Querydown into DuckDB SQL before running it.
+        // Assemble the four query parts into Querydown source, then compile it
+        // into DuckDB SQL before running it.
         let compiled = {
             let schema = self.schema.lock().unwrap();
-            match schema.as_deref() {
-                Some(schema_json) => compile::querydown_to_duckdb(&definition, schema_json),
-                None => Err("Schema not loaded yet. Please try again in a moment.".to_string()),
+            match (definition.assemble(&self.presets), schema.as_deref()) {
+                (Err(e), _) => Err(e),
+                (_, None) => {
+                    Err("Schema not loaded yet. Please try again in a moment.".to_string())
+                }
+                (Ok(source), Some(schema_json)) => {
+                    compile::querydown_to_duckdb(&source, schema_json)
+                }
             }
         };
         let sql = match compiled {

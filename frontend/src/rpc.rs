@@ -11,8 +11,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use uuid::Uuid;
 
+use crate::query_def::{QueryDefinition, Section, codec};
+
 /// A saved query. Timestamps are i64 epoch seconds and are authored here on the
-/// frontend, then persisted verbatim by the backend.
+/// frontend, then persisted verbatim by the backend. The structured definition
+/// travels (and is stored) as a JSON string in the `definition` field.
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct Query {
     pub(crate) id: Uuid,
@@ -20,7 +23,21 @@ pub(crate) struct Query {
     pub(crate) created_at: i64,
     pub(crate) modified_at: i64,
     pub(crate) last_play: i64,
+    #[serde(with = "codec")]
+    pub(crate) definition: QueryDefinition,
+}
+
+/// A saved query-section preset: a named, reusable Querydown fragment scoped
+/// to one base table and one query section.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct Preset {
+    pub(crate) id: Uuid,
+    pub(crate) name: String,
+    pub(crate) base_table: String,
+    pub(crate) section: Section,
     pub(crate) definition: String,
+    pub(crate) created_at: i64,
+    pub(crate) modified_at: i64,
 }
 
 /// Current wall-clock time as epoch seconds (local clock).
@@ -53,9 +70,45 @@ pub(crate) fn add_query(query: &Query) {
 }
 
 /// Persists an edited definition along with a new `modified_at`. Fire-and-forget.
-pub(crate) fn update_definition(id: Uuid, definition: &str, modified_at: i64) {
-    let params = json!({ "id": id, "definition": definition, "modified_at": modified_at });
+pub(crate) fn update_definition(id: Uuid, definition: &QueryDefinition, modified_at: i64) {
+    let params =
+        json!({ "id": id, "definition": definition.to_stored(), "modified_at": modified_at });
     dispatch_call("query.update_definition", params, |_| {});
+}
+
+/// Fetches every saved preset and stores the result in `out` for the UI to drain.
+pub(crate) fn list_presets(out: Arc<Mutex<Option<Vec<Preset>>>>, ctx: egui::Context) {
+    dispatch_call("preset.list", Value::Null, move |result| {
+        if let Ok(value) = result
+            && let Ok(list) = serde_json::from_value::<Vec<Preset>>(value)
+        {
+            *out.lock().unwrap() = Some(list);
+            ctx.request_repaint();
+        }
+    });
+}
+
+/// Inserts a new preset. Fire-and-forget.
+pub(crate) fn add_preset(preset: &Preset) {
+    let params = serde_json::to_value(preset).unwrap_or(Value::Null);
+    dispatch_call("preset.add", params, |_| {});
+}
+
+/// Persists an edited preset name/definition. Fire-and-forget.
+pub(crate) fn update_preset(id: Uuid, name: &str, definition: &str, modified_at: i64) {
+    let params = json!({
+        "id": id,
+        "name": name,
+        "definition": definition,
+        "modified_at": modified_at,
+    });
+    dispatch_call("preset.update", params, |_| {});
+}
+
+/// Deletes a saved preset. Fire-and-forget.
+pub(crate) fn delete_preset(id: Uuid) {
+    let params = json!({ "id": id });
+    dispatch_call("preset.delete", params, |_| {});
 }
 
 /// Records that a query was used to play a song (updates `last_play` only).

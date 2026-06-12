@@ -27,6 +27,20 @@ struct Query {
     definition: String,
 }
 
+/// A saved query-section preset as exchanged over the wire. The `section` is
+/// one of `filter`/`sort`/`display` and the `definition` is a raw Querydown
+/// fragment; both are opaque to the backend.
+#[derive(Serialize, Deserialize)]
+struct Preset {
+    id: String,
+    name: String,
+    base_table: String,
+    section: String,
+    definition: String,
+    created_at: i64,
+    modified_at: i64,
+}
+
 #[derive(Deserialize)]
 pub(crate) struct RpcRequest {
     method: String,
@@ -148,6 +162,42 @@ fn dispatch(state: &AppState, method: &str, params: Value) -> Result<Value, Stri
                 Ok(Value::Null)
             })
         }
+        "preset.list" => state.read(|conn| -> Result<Value, String> {
+            let presets = list_presets(conn)?;
+            serde_json::to_value(presets).map_err(|e| e.to_string())
+        }),
+        "preset.add" => {
+            let preset: Preset = from_params(params)?;
+            state.write(|conn| {
+                add_preset(conn, &preset)?;
+                Ok(Value::Null)
+            })
+        }
+        "preset.update" => {
+            #[derive(Deserialize)]
+            struct P {
+                id: String,
+                name: String,
+                definition: String,
+                modified_at: i64,
+            }
+            let p: P = from_params(params)?;
+            state.write(|conn| {
+                update_preset(conn, &p.id, &p.name, &p.definition, p.modified_at)?;
+                Ok(Value::Null)
+            })
+        }
+        "preset.delete" => {
+            #[derive(Deserialize)]
+            struct P {
+                id: String,
+            }
+            let p: P = from_params(params)?;
+            state.write(|conn| {
+                delete_preset(conn, &p.id)?;
+                Ok(Value::Null)
+            })
+        }
         other => Err(format!("method not found: {other}")),
     }
 }
@@ -219,6 +269,75 @@ fn rename_query(conn: &Connection, id: &str, name: &str) -> Result<(), String> {
     conn.execute(
         "UPDATE query SET name = ? WHERE id = TRY_CAST(? AS UUID)",
         duckdb::params![name, id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+fn list_presets(conn: &Connection) -> Result<Vec<Preset>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT id::text, name, base_table, section, definition, \
+             epoch(created_at)::bigint, epoch(modified_at)::bigint \
+             FROM preset ORDER BY name",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(Preset {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                base_table: row.get(2)?,
+                section: row.get(3)?,
+                definition: row.get(4)?,
+                created_at: row.get(5)?,
+                modified_at: row.get(6)?,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+    rows.collect::<Result<_, _>>().map_err(|e| e.to_string())
+}
+
+fn add_preset(conn: &Connection, preset: &Preset) -> Result<(), String> {
+    conn.execute(
+        "INSERT INTO preset (id, name, base_table, section, definition, created_at, modified_at) \
+         VALUES (TRY_CAST(? AS UUID), ?, ?, ?, ?, make_timestamp(? * 1000000)::timestamp_s, \
+         make_timestamp(? * 1000000)::timestamp_s)",
+        duckdb::params![
+            preset.id,
+            preset.name,
+            preset.base_table,
+            preset.section,
+            preset.definition,
+            preset.created_at,
+            preset.modified_at,
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+fn update_preset(
+    conn: &Connection,
+    id: &str,
+    name: &str,
+    definition: &str,
+    modified_at: i64,
+) -> Result<(), String> {
+    conn.execute(
+        "UPDATE preset SET name = ?, definition = ?, \
+         modified_at = make_timestamp(? * 1000000)::timestamp_s \
+         WHERE id = TRY_CAST(? AS UUID)",
+        duckdb::params![name, definition, modified_at, id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+fn delete_preset(conn: &Connection, id: &str) -> Result<(), String> {
+    conn.execute(
+        "DELETE FROM preset WHERE id = TRY_CAST(? AS UUID)",
+        duckdb::params![id],
     )
     .map_err(|e| e.to_string())?;
     Ok(())

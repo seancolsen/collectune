@@ -13,10 +13,16 @@ struct Migration {
 /// To add a new migration, create a SQL file in this directory named with a
 /// four-digit version prefix (e.g. `0002.sql`) and append a corresponding
 /// entry here. Migrations must be listed in strictly ascending order.
-const MIGRATIONS: &[Migration] = &[Migration {
-    version: 1,
-    sql: include_str!("migrations/0001.sql"),
-}];
+const MIGRATIONS: &[Migration] = &[
+    Migration {
+        version: 1,
+        sql: include_str!("migrations/0001.sql"),
+    },
+    Migration {
+        version: 2,
+        sql: include_str!("migrations/0002.sql"),
+    },
+];
 
 fn init_db_version_metadata(conn: &Connection) -> Result<(), duckdb::Error> {
     let sql = "
