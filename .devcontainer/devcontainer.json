@@ -28,9 +28,6 @@
       // Mirrors the relevant bits of the repo's .vscode/settings.json so
       // rust-analyzer and formatting behave the same inside the container.
       "settings": {
-        "rust-analyzer.linkedProjects": [
-          "./compiler/Cargo.toml"
-        ],
         "editor.formatOnSave": true,
         "editor.defaultFormatter": "rust-lang.rust-analyzer",
         "editor.tabSize": 4,
