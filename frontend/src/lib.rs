@@ -8,6 +8,7 @@ use uuid::Uuid;
 
 mod audio;
 mod builder;
+mod button;
 mod columns;
 mod compile;
 mod field_layout;
@@ -49,7 +50,7 @@ pub(crate) const ORGANIZER_SWIPE_VELOCITY: f32 = 400.0;
 /// the drawer tracks the finger 1:1 (offset by a constant amount).
 pub(crate) const ORGANIZER_DRAG_FRICTION: f32 = 16.0;
 
-pub(crate) const ACCENT_BLUE: egui::Color32 = egui::Color32::from_rgb(0x2E, 0x7C, 0xF6);
+pub(crate) const ACCENT_BLUE: egui::Color32 = egui::Color32::from_rgb(0xBC, 0xD0, 0xEA);
 
 pub fn setup_fonts(ctx: &egui::Context) {
     ctx.set_visuals(egui::Visuals::light());
@@ -150,8 +151,6 @@ pub struct App {
     pub(crate) pending_delete: Option<PendingDelete>,
     /// Which query-builder section (filter/sort/display) is open, if any.
     pub(crate) builder_section: Option<Section>,
-    /// The section restored when the narrow-screen wrench re-opens the builder.
-    pub(crate) last_builder_section: Section,
     /// All saved presets (every table and section), fetched at startup and kept
     /// in sync locally as the user adds/edits/deletes them.
     pub(crate) presets: Vec<rpc::Preset>,
@@ -190,7 +189,6 @@ impl Default for App {
             rename: None,
             pending_delete: None,
             builder_section: None,
-            last_builder_section: Section::Filter,
             presets: Vec::new(),
             loaded_presets: Arc::new(Mutex::new(None)),
             presets_fetch_started: false,

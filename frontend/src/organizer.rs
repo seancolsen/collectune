@@ -8,11 +8,12 @@ use std::sync::Arc;
 use eframe::egui;
 use uuid::Uuid;
 
+use crate::button::Button;
 use crate::icons;
-use crate::page::{QueryAction, inline_rename_field, query_actions_menu};
+use crate::page::{QueryAction, inline_rename_field, query_actions_menu, unsaved_marker_format};
 use crate::{
-    ACCENT_BLUE, App, ORGANIZER_DRAG_FRICTION, ORGANIZER_SWIPE_VELOCITY, ORGANIZER_WIDTH, Rename,
-    RenameSurface, rpc,
+    App, ORGANIZER_DRAG_FRICTION, ORGANIZER_SWIPE_VELOCITY, ORGANIZER_WIDTH, Rename, RenameSurface,
+    rpc,
 };
 
 /// Sliding "organizer" side panel state, including the in-progress drag gesture.
@@ -257,9 +258,18 @@ fn draw_query_list(
     ui.horizontal(|ui| {
         ui.add_space(12.0);
         ui.heading("Queries");
+        // The list-refresh button sits right after the heading, in a lighter
+        // color and with no background.
+        if Button::icon(icons::REFRESH)
+            .tint(ui.visuals().weak_text_color())
+            .show(ui)
+            .clicked()
+        {
+            actions.refresh = true;
+        }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.add_space(12.0);
-            if ui.button(icons::ADD.rich_text().size(16.0)).clicked() {
+            if Button::icon(icons::ADD).show(ui).clicked() {
                 actions.add = true;
             }
         });
@@ -268,14 +278,12 @@ fn draw_query_list(
     ui.add_space(4.0);
     ui.horizontal(|ui| {
         ui.add_space(12.0);
+        // Widen the filter so its right edge lines up with the add button's.
         ui.add(
             egui::TextEdit::singleline(filter)
                 .hint_text("Filter")
-                .desired_width(ORGANIZER_WIDTH - 72.0),
+                .desired_width(ORGANIZER_WIDTH - 24.0),
         );
-        if ui.button(icons::REFRESH.rich_text().size(14.0)).clicked() {
-            actions.refresh = true;
-        }
     });
 
     ui.add_space(4.0);
@@ -312,8 +320,8 @@ fn draw_query_list(
 /// (see `results::row_widget`) so selection looks consistent across the app.
 ///
 /// When the row is being renamed it shows an inline edit field instead of the
-/// name; otherwise it shows a `⋮` actions button (on hover/selection) and opens
-/// the Rename/Delete menu on `⋮`-click or right-click.
+/// name; otherwise it shows a `⋮` actions button (only while the row is hovered)
+/// and opens the Rename/Delete menu on `⋮`-click or right-click.
 fn query_list_widget(
     ui: &mut egui::Ui,
     item: &ListItem,
@@ -332,7 +340,8 @@ fn query_list_widget(
         let v = ui.visuals();
         (
             v.selection.bg_fill,
-            v.widgets.hovered.weak_bg_fill,
+            // Only a slight darkening on hover, matching the result rows.
+            crate::results::darken(v.panel_fill, crate::results::ROW_HOVER_DARKEN),
             v.widgets.noninteractive.bg_stroke.color,
             v.text_color(),
             v.weak_text_color(),
@@ -341,12 +350,7 @@ fn query_list_widget(
 
     if selected {
         let fill = if response.hovered() {
-            egui::Color32::from_rgba_unmultiplied(
-                sel_fill.r().saturating_sub(20),
-                sel_fill.g().saturating_sub(20),
-                sel_fill.b().saturating_sub(20),
-                sel_fill.a(),
-            )
+            crate::results::darken(sel_fill, 20)
         } else {
             sel_fill
         };
@@ -361,15 +365,6 @@ fn query_list_widget(
         egui::Stroke::new(1.0, sep_color),
     );
 
-    // Unsaved-changes dot, drawn in the left gutter.
-    if item.unsaved {
-        ui.painter().circle_filled(
-            egui::pos2(rect.left() + 12.0, rect.center().y),
-            3.0,
-            ACCENT_BLUE,
-        );
-    }
-
     // If this row is being renamed in the sidebar, show the inline field instead
     // of the name (and skip the actions button / navigation for this row).
     let editing = rename
@@ -377,7 +372,7 @@ fn query_list_widget(
         .filter(|r| r.surface == RenameSurface::Sidebar && r.id == item.id);
     if let Some(state) = editing {
         let field_rect = egui::Rect::from_min_max(
-            egui::pos2(rect.left() + 16.0, rect.top() + 4.0),
+            egui::pos2(rect.left() + 12.0, rect.top() + 4.0),
             egui::pos2(rect.right() - 8.0, rect.bottom() - 4.0),
         );
         let builder = egui::UiBuilder::new()
@@ -400,20 +395,51 @@ fn query_list_widget(
     }
 
     let font_id = egui::TextStyle::Body.resolve(ui.style());
-    ui.painter().text(
-        egui::pos2(rect.left() + 20.0, rect.center().y),
-        egui::Align2::LEFT_CENTER,
-        &item.name,
-        font_id,
-        text_color,
+    let name_x = rect.left() + 12.0;
+    let right_limit = rect.right() - 8.0;
+
+    // Lay out the superscript "unsaved" marker first (if any) so we know how much
+    // room to reserve for it — the name truncates with an ellipsis *before* it.
+    let marker_galley = item.unsaved.then(|| {
+        let mut job = egui::text::LayoutJob::default();
+        job.append(icons::UNSAVED.codepoint, 0.0, unsaved_marker_format());
+        ui.painter().layout_job(job)
+    });
+    let marker_gap = 2.0;
+    let reserved = marker_galley
+        .as_ref()
+        .map_or(0.0, |g| g.size().x + marker_gap);
+    let name_avail = (right_limit - name_x - reserved).max(0.0);
+
+    let mut name_job = egui::text::LayoutJob::single_section(
+        item.name.clone(),
+        egui::TextFormat {
+            font_id,
+            color: text_color,
+            ..Default::default()
+        },
     );
+    name_job.wrap = egui::text::TextWrapping::truncate_at_width(name_avail);
+    let name_galley = ui.painter().layout_job(name_job);
+    let name_w = name_galley.size().x;
+    let name_top = rect.center().y - name_galley.size().y / 2.0;
+    ui.painter()
+        .galley(egui::pos2(name_x, name_top), name_galley, text_color);
+    if let Some(marker) = marker_galley {
+        // Top-aligned (small font) so it reads as a raised superscript asterisk.
+        ui.painter().galley(
+            egui::pos2(name_x + name_w + marker_gap, name_top),
+            marker,
+            text_color,
+        );
+    }
 
     outcome.action = row_actions_menu(
         ui,
         item,
         &response,
         rect,
-        selected || response.hovered(),
+        response.hovered(),
         text_color,
         weak_text,
     );

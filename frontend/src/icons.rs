@@ -19,8 +19,12 @@ pub(crate) const DISPLAY: MaterialIcon = mi::ICON_KEY_VISUALIZER;
 // Generic actions.
 /// Overflow ("⋮") menu trigger.
 pub(crate) const MORE: MaterialIcon = mi::ICON_MORE_VERT;
-/// The explorer/sidebar (hamburger) toggle.
-pub(crate) const MENU: MaterialIcon = mi::ICON_MENU;
+/// The explorer/sidebar toggle when the explorer is open (closes it).
+pub(crate) const EXPLORER_CLOSE: MaterialIcon = mi::ICON_LEFT_PANEL_CLOSE;
+/// The explorer/sidebar toggle when the explorer is closed (opens it).
+pub(crate) const EXPLORER_OPEN: MaterialIcon = mi::ICON_LEFT_PANEL_OPEN;
+/// The superscript asterisk marking a query with unsaved changes.
+pub(crate) const UNSAVED: MaterialIcon = mi::ICON_EMERGENCY;
 /// A dropdown caret appended after a button's label.
 pub(crate) const EXPAND: MaterialIcon = mi::ICON_EXPAND_MORE;
 pub(crate) const ADD: MaterialIcon = mi::ICON_ADD;

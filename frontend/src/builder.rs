@@ -7,8 +7,8 @@ use eframe::egui;
 use uuid::Uuid;
 
 use crate::App;
-use crate::icons::{self, MaterialIcon};
-use crate::menu_bar::icon_label_button;
+use crate::button::Button;
+use crate::icons;
 use crate::now_playing::menu_item;
 use crate::page::DELETE_RED;
 use crate::query_def::{FilterParts, QueryDefinition, Section, SectionContent};
@@ -349,13 +349,10 @@ impl App {
                     ui.horizontal(|ui| {
                         small_heading(ui, heading);
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            revert = icon_button(ui, icons::RESET).clicked();
-                            save = ui
-                                .add_enabled(
-                                    !edit.name.trim().is_empty(),
-                                    egui::Button::new(icons::SAVE.rich_text().size(16.0))
-                                        .frame(false),
-                                )
+                            revert = Button::icon(icons::RESET).show(ui).clicked();
+                            save = Button::icon(icons::SAVE)
+                                .enabled(!edit.name.trim().is_empty())
+                                .show(ui)
                                 .clicked();
                             ui.add_sized(
                                 egui::vec2(ui.available_width(), 20.0),
@@ -604,8 +601,11 @@ impl App {
                         ui.weak(section.noun().to_lowercase());
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        let trash = icons::DELETE.rich_text().size(14.0).color(DELETE_RED);
-                        if ui.add(egui::Button::new(trash).frame(false)).clicked() {
+                        if Button::icon(icons::DELETE)
+                            .tint(DELETE_RED)
+                            .show(ui)
+                            .clicked()
+                        {
                             delete = Some(*id);
                         }
                     });
@@ -669,14 +669,9 @@ fn code_editor(ui: &mut egui::Ui, text: &mut String, rows: usize, run: &mut bool
     }
 }
 
-/// A frameless icon button sized to match the other toolbar glyphs.
-fn icon_button(ui: &mut egui::Ui, icon: MaterialIcon) -> egui::Response {
-    ui.add(egui::Button::new(icon.rich_text().size(16.0)).frame(false))
-}
-
 /// A `⋮` button opening a popup menu; returns the menu's chosen value, if any.
 fn dots_menu<T>(ui: &mut egui::Ui, content: impl FnOnce(&mut egui::Ui) -> Option<T>) -> Option<T> {
-    let dots = ui.add(egui::Button::new(icons::MORE.rich_text().size(16.0)).frame(false));
+    let dots = Button::icon(icons::MORE).show(ui);
     egui::Popup::menu(&dots)
         .align(egui::RectAlign::BOTTOM_END)
         .show(|ui| {
@@ -697,7 +692,10 @@ fn options_menu<T>(
     ui.add_space(4.0);
     ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
         let label = format!("{} options", section.noun());
-        let resp = icon_label_button(ui, icons::OPTIONS, &label, false, true);
+        let resp = Button::icon(icons::OPTIONS)
+            .label(label)
+            .caret(true)
+            .show(ui);
         choice = egui::Popup::menu(&resp)
             .align(egui::RectAlign::BOTTOM_END)
             .show(|ui| {

@@ -9,12 +9,29 @@ use eframe::egui;
 use uuid::Uuid;
 
 use crate::QueryState;
+use crate::button::Button;
 use crate::icons;
 use crate::now_playing::menu_item;
 use crate::rpc::Query;
 
 /// Red used for the destructive "Delete" affordances (menu item + dialog button).
 pub(crate) const DELETE_RED: egui::Color32 = egui::Color32::from_rgb(0xC0, 0x39, 0x2B);
+/// Red of the superscript "unsaved changes" marker shown after a query name.
+pub(crate) const UNSAVED_RED: egui::Color32 = DELETE_RED;
+/// Size of the superscript unsaved marker glyph.
+pub(crate) const UNSAVED_MARKER_SIZE: f32 = 10.0;
+
+/// The [`egui::TextFormat`] for the superscript "unsaved changes" marker — a
+/// small, raised, red `emergency` glyph appended after a query name. A small
+/// font with [`egui::Align::TOP`] gives the raised superscript-asterisk effect.
+pub(crate) fn unsaved_marker_format() -> egui::TextFormat {
+    egui::TextFormat {
+        font_id: icons::font_id(UNSAVED_MARKER_SIZE),
+        color: UNSAVED_RED,
+        valign: egui::Align::TOP,
+        ..Default::default()
+    }
+}
 
 /// An action chosen from a query's Rename/Delete menu.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -105,36 +122,19 @@ impl CurrentPage {
     }
 }
 
-/// Renders the explorer (organizer) toggle — the "☰" button shown at the
-/// top-left of every page. Every page type renders it by calling this one
-/// helper, which is what keeps the button identical (look and behaviour)
-/// across page types. When `active` (the organizer is open) it gets a dark
-/// filled background with a light glyph, mirroring the gear's active state.
-/// Returns `true` when clicked.
-pub(crate) fn explorer_button(ui: &mut egui::Ui, active: bool) -> bool {
-    let (rect, resp) = ui.allocate_exact_size(egui::vec2(26.0, 26.0), egui::Sense::click());
-    if ui.is_rect_visible(rect) {
-        if active {
-            ui.painter()
-                .rect_filled(rect, 4.0, ui.visuals().text_color());
-        } else if resp.hovered() {
-            ui.painter()
-                .rect_filled(rect, 4.0, ui.visuals().widgets.hovered.weak_bg_fill);
-        }
-        let icon_color = if active {
-            egui::Color32::WHITE
-        } else {
-            ui.visuals().text_color()
-        };
-        ui.painter().text(
-            rect.center(),
-            egui::Align2::CENTER_CENTER,
-            icons::MENU.codepoint,
-            icons::font_id(18.0),
-            icon_color,
-        );
-    }
-    resp.clicked()
+/// Renders the explorer (organizer) toggle shown at the top-left of every page.
+/// Every page type renders it by calling this one helper, which is what keeps
+/// the button identical (look and behaviour) across page types. It uses no
+/// background; only the glyph changes — `left_panel_close` while the explorer is
+/// `open` (click to close), `left_panel_open` while it's closed. Returns `true`
+/// when clicked.
+pub(crate) fn explorer_button(ui: &mut egui::Ui, open: bool) -> bool {
+    let icon = if open {
+        icons::EXPLORER_CLOSE
+    } else {
+        icons::EXPLORER_OPEN
+    };
+    Button::icon(icon).show(ui).clicked()
 }
 
 /// A single query page: an editable `live` query plus the `saved` snapshot it was

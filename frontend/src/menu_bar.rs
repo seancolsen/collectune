@@ -1,27 +1,28 @@
-//! The top menu bar (organizer toggle, current query name, save/run, and the
-//! query-builder entry points). On wide screens the Base/Filter/Sort/Display
-//! buttons are inlined into the bar; on narrow screens they live in a second-
-//! row toolbar toggled by the wrench button.
+//! The top menu bar: the explorer toggle, the current query's name (with a
+//! superscript unsaved-changes marker and an inline save button right after it),
+//! the query options ("⋮") menu — which also holds the Base-table selector as a
+//! submenu — and the Filter/Sort/Display builder toggles plus the run button.
 
 use std::sync::{Arc, Mutex};
 
 use eframe::egui;
 use uuid::Uuid;
 
+use crate::App;
+use crate::button::Button;
 use crate::icons::{self, MaterialIcon};
+use crate::now_playing::menu_item;
 use crate::page::{
-    QueryAction, QueryPage, explorer_button, inline_rename_field, query_actions_menu,
+    DELETE_RED, QueryAction, QueryPage, explorer_button, inline_rename_field, unsaved_marker_format,
 };
 use crate::query_def::Section;
-use crate::{ACCENT_BLUE, App, Rename, RenameSurface};
+use crate::{Rename, RenameSurface};
 
-/// At or above this viewport width the Base/Filter/Sort/Display buttons are
-/// inlined into the top toolbar; below it they move to a second-row toolbar
-/// that the wrench button toggles.
-const INLINE_SECTIONS_MIN_WIDTH: f32 = 850.0;
-
-/// Light-blue background of the active (open) section button.
-const ACTIVE_SECTION_BG: egui::Color32 = egui::Color32::from_rgb(0xBB, 0xD9, 0xFB);
+/// An item chosen from the query page's options ("⋮") menu.
+enum PageMenu {
+    Action(QueryAction),
+    Base(String),
+}
 
 impl App {
     // One linear pass over the bar's widgets followed by the application of
@@ -29,7 +30,6 @@ impl App {
     #[allow(clippy::too_many_lines)]
     pub(crate) fn render_menu_bar(&mut self, ui: &mut egui::Ui) {
         let panel_fill = ui.style().visuals.panel_fill;
-        let inline_sections = ui.ctx().viewport_rect().width() >= INLINE_SECTIONS_MIN_WIDTH;
         let current_id = self.current.query_id();
         let has_page = current_id.is_some();
         let name = self
@@ -43,12 +43,10 @@ impl App {
             .is_some_and(|p| p.results.lock().unwrap().running);
         let unsaved = self.current_page().is_some_and(QueryPage::unsaved);
         let organizer_open = self.organizer.open;
-        let builder_open = self.builder_section.is_some();
         let builder_section = self.builder_section;
         let schema = Arc::clone(&self.schema);
 
         let mut toggle_organizer = false;
-        let mut toggle_builder = false;
         let mut section_clicked = None;
         let mut base_choice = None;
         let mut run_now = false;
@@ -56,7 +54,8 @@ impl App {
         let mut begin_rename = false;
         let mut rename_commit = false;
         let mut rename_cancel = false;
-        let mut menu_action = None;
+        let mut want_rename = false;
+        let mut want_delete = false;
         let rename = &mut self.rename;
 
         egui::Panel::top("menu_bar")
@@ -76,66 +75,47 @@ impl App {
                     if has_page {
                         ui.add_space(6.0);
                         (begin_rename, rename_commit, rename_cancel) =
-                            draw_page_name(ui, &name, rename, current_id);
+                            draw_page_name(ui, &name, unsaved, rename, current_id);
+                        // The save button sits immediately after the name, shown
+                        // only while there are unsaved changes.
+                        if unsaved && Button::icon(icons::SAVE).show(ui).clicked() {
+                            save_now = true;
+                        }
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.add_space(8.0);
-                        if has_page && let Some(a) = draw_page_menu_button(ui) {
-                            menu_action = Some(a);
-                        }
                         if has_page {
-                            if inline_sections {
-                                section_clicked =
-                                    draw_section_buttons(ui, builder_section).or(section_clicked);
-                                base_choice = draw_base_button(ui, &base_table, &schema);
-                                ui.separator();
-                            } else if wrench_button(ui, builder_open).clicked() {
-                                toggle_builder = true;
+                            match draw_page_menu_button(ui, &base_table, &schema) {
+                                Some(PageMenu::Base(table)) => base_choice = Some(table),
+                                Some(PageMenu::Action(QueryAction::Rename)) => want_rename = true,
+                                Some(PageMenu::Action(QueryAction::Delete)) => want_delete = true,
+                                None => {}
+                            }
+                            section_clicked = draw_section_buttons(ui, builder_section);
+                            ui.separator();
+                            if Button::icon(icons::RUN)
+                                .enabled(!running)
+                                .spin(running)
+                                .show(ui)
+                                .clicked()
+                            {
+                                run_now = true;
                             }
                         }
-                        (run_now, save_now) =
-                            paint_run_save(ui, has_page && !running, running, unsaved);
                     });
                 });
             });
 
-        // The narrow-screen second-row toolbar holding the section buttons,
-        // shown only while the builder is open.
-        if has_page && !inline_sections && builder_open {
-            egui::Panel::top("section_bar")
-                .exact_size(30.0)
-                .show_separator_line(false)
-                .show_inside(ui, |ui| {
-                    ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                        ui.add_space(4.0);
-                        base_choice = draw_base_button(ui, &base_table, &schema);
-                        section_clicked =
-                            draw_section_buttons(ui, builder_section).or(section_clicked);
-                    });
-                });
-        }
-
         if toggle_organizer {
             self.organizer.open = !self.organizer.open;
         }
-        if toggle_builder {
-            self.builder_section = if builder_open {
-                None
-            } else {
-                Some(self.last_builder_section)
-            };
-        }
+        // The section buttons are toggles: clicking the open one closes the builder.
         if let Some(section) = section_clicked {
-            // Wide screens: the buttons are toggles (click again to close).
-            // Narrow screens: they're tabs — the wrench is the only way out.
-            self.builder_section = if inline_sections && self.builder_section == Some(section) {
+            self.builder_section = if self.builder_section == Some(section) {
                 None
             } else {
                 Some(section)
             };
-            if let Some(section) = self.builder_section {
-                self.last_builder_section = section;
-            }
         }
         if let Some(table) = base_choice
             && let Some(page) = self.current_page_mut()
@@ -156,10 +136,10 @@ impl App {
             self.cancel_rename();
         }
         if let Some(id) = current_id {
-            if begin_rename || menu_action == Some(QueryAction::Rename) {
+            if begin_rename || want_rename {
                 self.begin_rename(id, RenameSurface::Page);
             }
-            if menu_action == Some(QueryAction::Delete) {
+            if want_delete {
                 self.request_delete(id);
             }
         }
@@ -168,10 +148,12 @@ impl App {
 
 /// Renders the page's query name: an inline rename field when this query is being
 /// renamed from the page, otherwise a double-clickable label (double-click begins
-/// a rename). Returns `(begin_rename, rename_commit, rename_cancel)`.
+/// a rename) carrying a superscript unsaved-changes marker. Returns
+/// `(begin_rename, rename_commit, rename_cancel)`.
 fn draw_page_name(
     ui: &mut egui::Ui,
     name: &str,
+    unsaved: bool,
     rename: &mut Option<Rename>,
     current_id: Option<Uuid>,
 ) -> (bool, bool, bool) {
@@ -188,26 +170,82 @@ fn draw_page_name(
         );
         (false, res.commit, res.cancel)
     } else {
+        let mut job = egui::text::LayoutJob::default();
+        job.append(
+            name,
+            0.0,
+            egui::TextFormat {
+                font_id: egui::TextStyle::Body.resolve(ui.style()),
+                color: ui.visuals().text_color(),
+                ..Default::default()
+            },
+        );
+        if unsaved {
+            job.append(icons::UNSAVED.codepoint, 1.0, unsaved_marker_format());
+        }
         let begin = ui
-            .add(egui::Label::new(name).sense(egui::Sense::click()))
+            .add(egui::Label::new(job).sense(egui::Sense::click()))
             .double_clicked();
         (begin, false, false)
     }
 }
 
-/// The page's "⋮" actions button in the menu bar, opening the shared Rename/Delete
-/// menu for the current query. Returns the chosen action, if any.
-fn draw_page_menu_button(ui: &mut egui::Ui) -> Option<QueryAction> {
-    let dots = ui.add(egui::Button::new(icons::MORE.rich_text().size(18.0)).frame(false));
-    let mut action = None;
-    if let Some(inner) = egui::Popup::menu(&dots)
+/// The page's "⋮" options button, opening a menu with the Base-table submenu and
+/// the Rename/Delete actions. Returns the chosen item, if any.
+fn draw_page_menu_button(
+    ui: &mut egui::Ui,
+    base_table: &str,
+    schema: &Arc<Mutex<Option<String>>>,
+) -> Option<PageMenu> {
+    let dots = Button::icon(icons::MORE).show(ui);
+    egui::Popup::menu(&dots)
         .align(egui::RectAlign::TOP_END)
-        .show(query_actions_menu)
-        && inner.inner.is_some()
-    {
-        action = inner.inner;
-    }
-    action
+        .show(|ui| {
+            ui.set_width(150.0);
+            let mut chosen = None;
+            if let Some(table) = base_submenu(ui, base_table, schema) {
+                chosen = Some(PageMenu::Base(table));
+            }
+            if menu_item(ui, icons::RENAME, "Rename", true, None).clicked() {
+                chosen = Some(PageMenu::Action(QueryAction::Rename));
+            }
+            if menu_item(ui, icons::DELETE, "Delete", true, Some(DELETE_RED)).clicked() {
+                chosen = Some(PageMenu::Action(QueryAction::Delete));
+            }
+            chosen
+        })
+        .and_then(|inner| inner.inner)
+}
+
+/// The "Base ▶" submenu listing every table in the schema. Returns the newly
+/// chosen base table, if any.
+fn base_submenu(
+    ui: &mut egui::Ui,
+    base_table: &str,
+    schema: &Arc<Mutex<Option<String>>>,
+) -> Option<String> {
+    let label = format!("{}  Base", icons::BASE.codepoint);
+    let (_, inner) = egui::containers::menu::SubMenuButton::new(label).ui(ui, |ui| {
+        ui.set_min_width(140.0);
+        let tables = schema
+            .lock()
+            .unwrap()
+            .as_deref()
+            .map(table_names)
+            .unwrap_or_default();
+        if tables.is_empty() {
+            ui.weak("Loading schema…");
+            return None;
+        }
+        let mut choice = None;
+        for table in tables {
+            if ui.selectable_label(table == base_table, &table).clicked() {
+                choice = Some(table);
+            }
+        }
+        choice
+    });
+    inner.and_then(|i| i.inner)
 }
 
 /// The icon for a section's button.
@@ -219,7 +257,7 @@ fn section_icon(section: Section) -> MaterialIcon {
     }
 }
 
-/// Draws the Filter/Sort/Display buttons in the `ui`'s layout direction.
+/// Draws the Filter/Sort/Display toggle buttons in the `ui`'s layout direction.
 /// Returns the clicked section, if any.
 fn draw_section_buttons(ui: &mut egui::Ui, open: Option<Section>) -> Option<Section> {
     let mut clicked = None;
@@ -228,49 +266,16 @@ fn draw_section_buttons(ui: &mut egui::Ui, open: Option<Section>) -> Option<Sect
         sections.reverse();
     }
     for section in sections {
-        if icon_label_button(
-            ui,
-            section_icon(section),
-            section.label(),
-            open == Some(section),
-            false,
-        )
-        .clicked()
+        if Button::icon(section_icon(section))
+            .label(section.label())
+            .active(open == Some(section))
+            .show(ui)
+            .clicked()
         {
             clicked = Some(section);
         }
     }
     clicked
-}
-
-/// The "Base ▾" button and its dropdown listing every table in the schema.
-/// Returns the newly chosen base table, if any.
-fn draw_base_button(
-    ui: &mut egui::Ui,
-    base_table: &str,
-    schema: &Arc<Mutex<Option<String>>>,
-) -> Option<String> {
-    let resp = icon_label_button(ui, icons::BASE, "Base", false, true);
-    let mut choice = None;
-    egui::Popup::menu(&resp).show(|ui| {
-        ui.set_min_width(120.0);
-        let tables = schema
-            .lock()
-            .unwrap()
-            .as_deref()
-            .map(table_names)
-            .unwrap_or_default();
-        if tables.is_empty() {
-            ui.weak("Loading schema…");
-            return;
-        }
-        for table in tables {
-            if ui.selectable_label(table == base_table, &table).clicked() {
-                choice = Some(table);
-            }
-        }
-    });
-    choice
 }
 
 /// The table names from the Querydown schema JSON.
@@ -286,108 +291,4 @@ fn table_names(schema_json: &str) -> Vec<String> {
         .filter_map(|t| t.get("name").and_then(|n| n.as_str()))
         .map(str::to_string)
         .collect()
-}
-
-/// An icon + label toolbar button, with an optional dropdown caret. `active`
-/// gives it the light-blue toggled background.
-pub(crate) fn icon_label_button(
-    ui: &mut egui::Ui,
-    icon: MaterialIcon,
-    label: &str,
-    active: bool,
-    caret: bool,
-) -> egui::Response {
-    let color = ui.visuals().text_color();
-    let mut job = egui::text::LayoutJob::default();
-    job.append(
-        icon.codepoint,
-        0.0,
-        egui::TextFormat {
-            font_id: icons::font_id(14.0),
-            color,
-            ..Default::default()
-        },
-    );
-    job.append(
-        label,
-        5.0,
-        egui::TextFormat {
-            font_id: egui::FontId::proportional(13.0),
-            color,
-            ..Default::default()
-        },
-    );
-    if caret {
-        job.append(
-            icons::EXPAND.codepoint,
-            4.0,
-            egui::TextFormat {
-                font_id: icons::font_id(10.0),
-                color,
-                ..Default::default()
-            },
-        );
-    }
-    let button = if active {
-        egui::Button::new(job).fill(ACTIVE_SECTION_BG)
-    } else {
-        egui::Button::new(job).frame(false)
-    };
-    ui.add(button)
-}
-
-/// Paints the wrench (query-builder) toggle shown on narrow screens, mirroring
-/// the explorer button's manual rendering but with a blue active fill.
-fn wrench_button(ui: &mut egui::Ui, active: bool) -> egui::Response {
-    let font = icons::font_id(18.0);
-    let (rect, resp) = ui.allocate_exact_size(egui::vec2(26.0, 26.0), egui::Sense::click());
-    if ui.is_rect_visible(rect) {
-        if active {
-            ui.painter().rect_filled(rect, 4.0, ACCENT_BLUE);
-        } else if resp.hovered() {
-            ui.painter()
-                .rect_filled(rect, 4.0, ui.visuals().widgets.hovered.weak_bg_fill);
-        }
-        let icon_color = if active {
-            egui::Color32::WHITE
-        } else {
-            ui.visuals().text_color()
-        };
-        ui.painter().text(
-            rect.center(),
-            egui::Align2::CENTER_CENTER,
-            icons::BUILDER.codepoint,
-            font,
-            icon_color,
-        );
-    }
-    resp
-}
-
-/// Paints the run button (with spinner) and, when there are unsaved changes, the
-/// save button to its left. Returns `(run_clicked, save_clicked)`.
-fn paint_run_save(
-    ui: &mut egui::Ui,
-    run_enabled: bool,
-    running: bool,
-    unsaved: bool,
-) -> (bool, bool) {
-    let run = ui
-        .add_enabled(
-            run_enabled,
-            egui::Button::new(icons::RUN.rich_text().size(18.0)).frame(false),
-        )
-        .clicked();
-    if running {
-        ui.spinner();
-    }
-    let mut save = false;
-    if unsaved
-        && ui
-            .add(egui::Button::new(icons::SAVE.rich_text().size(18.0)).frame(false))
-            .clicked()
-    {
-        save = true;
-    }
-    (run, save)
 }

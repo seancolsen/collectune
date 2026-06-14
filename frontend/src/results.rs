@@ -16,6 +16,19 @@ const ROW_PAD_Y: f32 = 6.0;
 const TEXT_PAD_X: f32 = 8.0;
 /// Horizontal gap between adjacent columns on a line.
 const COL_GAP: f32 = 16.0;
+/// How much darker an un-selected row gets on hover (per RGB channel). Small, so
+/// the hover effect is only slightly darker than an un-hovered row.
+pub(crate) const ROW_HOVER_DARKEN: u8 = 10;
+
+/// Returns `color` darkened by `amount` on each RGB channel (alpha unchanged).
+pub(crate) fn darken(color: egui::Color32, amount: u8) -> egui::Color32 {
+    egui::Color32::from_rgba_unmultiplied(
+        color.r().saturating_sub(amount),
+        color.g().saturating_sub(amount),
+        color.b().saturating_sub(amount),
+        color.a(),
+    )
+}
 
 impl App {
     /// Returns the memoized field layout for the given columns and width, recomputing
@@ -253,17 +266,13 @@ fn draw_row(
     let base_bg = if selected {
         let base = visuals.selection.bg_fill;
         if response.hovered() {
-            egui::Color32::from_rgba_unmultiplied(
-                base.r().saturating_sub(20),
-                base.g().saturating_sub(20),
-                base.b().saturating_sub(20),
-                base.a(),
-            )
+            darken(base, 20)
         } else {
             base
         }
     } else if response.hovered() {
-        visuals.widgets.hovered.weak_bg_fill
+        // Only a slight darkening on hover, so the effect is subtle.
+        darken(visuals.extreme_bg_color, ROW_HOVER_DARKEN)
     } else {
         visuals.extreme_bg_color
     };
