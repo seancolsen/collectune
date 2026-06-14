@@ -42,6 +42,8 @@ impl App {
             .current_page()
             .is_some_and(|p| p.results.lock().unwrap().running);
         let unsaved = self.current_page().is_some_and(QueryPage::unsaved);
+        // "Revert changes" is offered only for a saved query with unsaved edits.
+        let show_revert = unsaved && self.current_page().is_some_and(QueryPage::is_persisted);
         let organizer_open = self.organizer.open;
         let builder_section = self.builder_section;
         let schema = Arc::clone(&self.schema);
@@ -55,6 +57,7 @@ impl App {
         let mut rename_commit = false;
         let mut rename_cancel = false;
         let mut want_rename = false;
+        let mut want_revert = false;
         let mut want_delete = false;
         let rename = &mut self.rename;
 
@@ -85,9 +88,10 @@ impl App {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.add_space(8.0);
                         if has_page {
-                            match draw_page_menu_button(ui, &base_table, &schema) {
+                            match draw_page_menu_button(ui, &base_table, show_revert, &schema) {
                                 Some(PageMenu::Base(table)) => base_choice = Some(table),
                                 Some(PageMenu::Action(QueryAction::Rename)) => want_rename = true,
+                                Some(PageMenu::Action(QueryAction::Revert)) => want_revert = true,
                                 Some(PageMenu::Action(QueryAction::Delete)) => want_delete = true,
                                 None => {}
                             }
@@ -138,6 +142,9 @@ impl App {
         if let Some(id) = current_id {
             if begin_rename || want_rename {
                 self.begin_rename(id, RenameSurface::Page);
+            }
+            if want_revert {
+                self.revert_query(id);
             }
             if want_delete {
                 self.request_delete(id);
@@ -191,10 +198,12 @@ fn draw_page_name(
 }
 
 /// The page's "⋮" options button, opening a menu with the Base-table submenu and
-/// the Rename/Delete actions. Returns the chosen item, if any.
+/// the Rename/Revert/Delete actions. "Revert changes" is shown only when
+/// `show_revert` (a saved query with unsaved edits). Returns the chosen item, if any.
 fn draw_page_menu_button(
     ui: &mut egui::Ui,
     base_table: &str,
+    show_revert: bool,
     schema: &Arc<Mutex<Option<String>>>,
 ) -> Option<PageMenu> {
     let dots = Button::icon(icons::MORE).show(ui);
@@ -208,6 +217,9 @@ fn draw_page_menu_button(
             }
             if menu_item(ui, icons::RENAME, "Rename", true, None).clicked() {
                 chosen = Some(PageMenu::Action(QueryAction::Rename));
+            }
+            if show_revert && menu_item(ui, icons::REVERT, "Revert changes", true, None).clicked() {
+                chosen = Some(PageMenu::Action(QueryAction::Revert));
             }
             if menu_item(ui, icons::DELETE, "Delete", true, Some(DELETE_RED)).clicked() {
                 chosen = Some(PageMenu::Action(QueryAction::Delete));

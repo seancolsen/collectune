@@ -33,21 +33,28 @@ pub(crate) fn unsaved_marker_format() -> egui::TextFormat {
     }
 }
 
-/// An action chosen from a query's Rename/Delete menu.
+/// An action chosen from a query's options menu.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum QueryAction {
     Rename,
+    /// Discard unsaved edits, restoring the last-saved version. Only offered for
+    /// a query that has already been saved.
+    Revert,
     Delete,
 }
 
-/// Renders the shared Rename/Delete menu body. Used both for the sidebar row's
+/// Renders the shared query-actions menu body. Used both for the sidebar row's
 /// `⋮`/right-click menu and the query page's `⋮` menu, so the two stay identical.
-/// Returns the chosen action, if any.
-pub(crate) fn query_actions_menu(ui: &mut egui::Ui) -> Option<QueryAction> {
+/// `show_revert` gates the "Revert changes" item — it's shown only for a query
+/// that has already been saved. Returns the chosen action, if any.
+pub(crate) fn query_actions_menu(ui: &mut egui::Ui, show_revert: bool) -> Option<QueryAction> {
     ui.set_width(130.0);
     let mut action = None;
     if menu_item(ui, icons::RENAME, "Rename", true, None).clicked() {
         action = Some(QueryAction::Rename);
+    }
+    if show_revert && menu_item(ui, icons::REVERT, "Revert changes", true, None).clicked() {
+        action = Some(QueryAction::Revert);
     }
     if menu_item(ui, icons::DELETE, "Delete", true, Some(DELETE_RED)).clicked() {
         action = Some(QueryAction::Delete);

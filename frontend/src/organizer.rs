@@ -31,6 +31,9 @@ struct ListItem {
     id: Uuid,
     name: String,
     unsaved: bool,
+    /// Whether the query has already been saved (exists in the backend). Gates
+    /// the "Revert changes" menu item.
+    persisted: bool,
 }
 
 /// Deferred outcomes of interacting with the query list, applied after the
@@ -42,6 +45,7 @@ struct ListActions {
     refresh: bool,
     clicked: Option<Uuid>,
     rename_request: Option<Uuid>,
+    revert_request: Option<Uuid>,
     delete_request: Option<Uuid>,
     rename_commit: bool,
     rename_cancel: bool,
@@ -180,6 +184,9 @@ impl App {
         if let Some(id) = actions.rename_request {
             self.begin_rename(id, RenameSurface::Sidebar);
         }
+        if let Some(id) = actions.revert_request {
+            self.revert_query(id);
+        }
         if let Some(id) = actions.delete_request {
             self.request_delete(id);
         }
@@ -203,6 +210,7 @@ impl App {
                         id: p.live.id,
                         name: p.live.name.clone(),
                         unsaved: p.unsaved(),
+                        persisted: p.is_persisted(),
                     },
                 )
             })
@@ -306,6 +314,7 @@ fn draw_query_list(
                 }
                 match out.action {
                     Some(QueryAction::Rename) => actions.rename_request = Some(item.id),
+                    Some(QueryAction::Revert) => actions.revert_request = Some(item.id),
                     Some(QueryAction::Delete) => actions.delete_request = Some(item.id),
                     None => {}
                 }
@@ -489,16 +498,19 @@ fn row_actions_menu(
     }
 
     // Opened by clicking "⋮" (anchored under the button) or by right-clicking
-    // anywhere on the row (at the pointer).
+    // anywhere on the row (at the pointer). "Revert changes" is offered only for a
+    // saved query that has unsaved edits to revert.
+    let show_revert = item.persisted && item.unsaved;
     let mut action = None;
     if let Some(inner) = egui::Popup::menu(&btn_resp)
         .align(egui::RectAlign::BOTTOM_END)
-        .show(query_actions_menu)
+        .show(|ui| query_actions_menu(ui, show_revert))
         && inner.inner.is_some()
     {
         action = inner.inner;
     }
-    if let Some(inner) = egui::Popup::context_menu(row).show(query_actions_menu)
+    if let Some(inner) =
+        egui::Popup::context_menu(row).show(|ui| query_actions_menu(ui, show_revert))
         && inner.inner.is_some()
     {
         action = inner.inner;

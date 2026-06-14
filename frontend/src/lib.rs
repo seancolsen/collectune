@@ -456,6 +456,23 @@ impl App {
         self.rename = None;
     }
 
+    /// Discards a query's unsaved edits, restoring its `live` version from the
+    /// last-saved snapshot. A no-op for a never-saved query (nothing to revert
+    /// to). Also cancels any in-progress rename of the query, since reverting
+    /// restores its saved name.
+    pub(crate) fn revert_query(&mut self, id: Uuid) {
+        let Some(page) = self.pages.iter_mut().find(|p| p.live.id == id) else {
+            return;
+        };
+        let Some(saved) = page.saved.clone() else {
+            return;
+        };
+        page.live = saved;
+        if self.rename.as_ref().is_some_and(|r| r.id == id) {
+            self.rename = None;
+        }
+    }
+
     /// Opens the delete-confirmation modal for `id`.
     pub(crate) fn request_delete(&mut self, id: Uuid) {
         if let Some(page) = self.pages.iter().find(|p| p.live.id == id) {

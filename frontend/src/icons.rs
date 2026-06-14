@@ -37,6 +37,8 @@ pub(crate) const CLEAR: MaterialIcon = mi::ICON_BACKSPACE;
 pub(crate) const SAVE: MaterialIcon = mi::ICON_SAVE;
 /// "Reset to default" / revert an in-progress edit.
 pub(crate) const RESET: MaterialIcon = mi::ICON_UNDO;
+/// Revert a saved query's unsaved changes back to its last-saved version.
+pub(crate) const REVERT: MaterialIcon = mi::ICON_UNDO;
 /// (Re-)run the current query.
 pub(crate) const RUN: MaterialIcon = mi::ICON_REFRESH;
 /// Reload a list from the backend.
