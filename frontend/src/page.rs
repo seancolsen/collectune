@@ -33,6 +33,44 @@ pub(crate) fn unsaved_marker_format() -> egui::TextFormat {
     }
 }
 
+/// Horizontal gap between a query name and its trailing unsaved marker.
+pub(crate) const MARKER_GAP: f32 = 2.0;
+
+/// Lays out a query name truncated to `max_width`, reserving room for a trailing
+/// superscript "unsaved" marker (when `unsaved`) so the marker survives the
+/// truncation instead of being dropped along with the ellipsized text. Returns
+/// the name galley and the marker galley (if any); the caller paints the marker
+/// top-aligned just after the name (offset by [`MARKER_GAP`]). Shared by the
+/// sidebar rows and the query page's title so both truncate identically.
+pub(crate) fn layout_query_name(
+    ui: &egui::Ui,
+    name: &str,
+    unsaved: bool,
+    font_id: egui::FontId,
+    color: egui::Color32,
+    max_width: f32,
+) -> (Arc<egui::Galley>, Option<Arc<egui::Galley>>) {
+    let marker_galley = unsaved.then(|| {
+        let mut job = egui::text::LayoutJob::default();
+        job.append(icons::UNSAVED.codepoint, 0.0, unsaved_marker_format());
+        ui.painter().layout_job(job)
+    });
+    let reserved = marker_galley
+        .as_ref()
+        .map_or(0.0, |g| g.size().x + MARKER_GAP);
+    let name_avail = (max_width - reserved).max(0.0);
+    let mut name_job = egui::text::LayoutJob::single_section(
+        name.to_owned(),
+        egui::TextFormat {
+            font_id,
+            color,
+            ..Default::default()
+        },
+    );
+    name_job.wrap = egui::text::TextWrapping::truncate_at_width(name_avail);
+    (ui.painter().layout_job(name_job), marker_galley)
+}
+
 /// An action chosen from a query's options menu.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum QueryAction {

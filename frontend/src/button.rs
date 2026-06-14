@@ -12,7 +12,7 @@ use crate::icons::{self, MaterialIcon};
 /// Light-blue background of an active (toggled-on) button.
 const ACTIVE_BG: egui::Color32 = egui::Color32::from_rgb(0xBB, 0xD9, 0xFB);
 /// The fixed height (and icon-only width) shared by every button.
-const SIZE: f32 = 26.0;
+pub(crate) const SIZE: f32 = 26.0;
 /// Icon glyph size.
 const ICON_SIZE: f32 = 16.0;
 /// Label font size.
@@ -176,15 +176,15 @@ impl Button {
                 egui::StrokeKind::Inside,
             );
 
+            let pos = rect.center() - galley.size() / 2.0;
             if self.spin {
                 ui.ctx().request_repaint();
                 let angle = ui.input(|i| i.time) as f32 * std::f32::consts::TAU;
                 ui.painter().add(
-                    egui::epaint::TextShape::new(rect.center(), galley, color)
+                    egui::epaint::TextShape::new(pos, galley, color)
                         .with_angle_and_anchor(angle, egui::Align2::CENTER_CENTER),
                 );
             } else {
-                let pos = rect.center() - galley.size() / 2.0;
                 ui.painter().galley(pos, galley, color);
             }
         }

@@ -10,7 +10,7 @@ use uuid::Uuid;
 
 use crate::button::Button;
 use crate::icons;
-use crate::page::{QueryAction, inline_rename_field, query_actions_menu, unsaved_marker_format};
+use crate::page::{QueryAction, inline_rename_field, query_actions_menu};
 use crate::{
     App, ORGANIZER_DRAG_FRICTION, ORGANIZER_SWIPE_VELOCITY, ORGANIZER_WIDTH, Rename, RenameSurface,
     rpc,
@@ -405,31 +405,46 @@ fn query_list_widget(
 
     let font_id = egui::TextStyle::Body.resolve(ui.style());
     let name_x = rect.left() + 12.0;
-    let right_limit = rect.right() - 8.0;
 
-    // Lay out the superscript "unsaved" marker first (if any) so we know how much
-    // room to reserve for it — the name truncates with an ellipsis *before* it.
-    let marker_galley = item.unsaved.then(|| {
-        let mut job = egui::text::LayoutJob::default();
-        job.append(icons::UNSAVED.codepoint, 0.0, unsaved_marker_format());
-        ui.painter().layout_job(job)
-    });
-    let marker_gap = 2.0;
-    let reserved = marker_galley
-        .as_ref()
-        .map_or(0.0, |g| g.size().x + marker_gap);
-    let name_avail = (right_limit - name_x - reserved).max(0.0);
+    // Interact with the "⋮" actions button up front so the name can reserve room
+    // for it. It shows whenever the row or the button itself is hovered.
+    let (btn_rect, btn_resp) = actions_button(ui, item, rect);
+    let show_button = response.hovered() || btn_resp.hovered();
 
-    let mut name_job = egui::text::LayoutJob::single_section(
-        item.name.clone(),
-        egui::TextFormat {
-            font_id,
-            color: text_color,
-            ..Default::default()
-        },
+    // While shown, the actions button (24px + 2px margin) occupies the right
+    // edge, so the name and marker get less room to avoid overlapping it.
+    let right_limit = rect.right() - if show_button { 32.0 } else { 8.0 };
+
+    draw_row_name(ui, item, rect, name_x, right_limit, font_id, text_color);
+
+    outcome.action = row_actions_menu(
+        ui, item, &response, btn_rect, &btn_resp, text_color, weak_text,
     );
-    name_job.wrap = egui::text::TextWrapping::truncate_at_width(name_avail);
-    let name_galley = ui.painter().layout_job(name_job);
+    outcome.clicked = response.clicked();
+    outcome
+}
+
+/// Draws a row's query name (truncated to `[name_x, right_limit]`) followed by a
+/// superscript "unsaved" marker. The marker is laid out first so the name leaves
+/// room for it, truncating with an ellipsis *before* it.
+fn draw_row_name(
+    ui: &mut egui::Ui,
+    item: &ListItem,
+    rect: egui::Rect,
+    name_x: f32,
+    right_limit: f32,
+    font_id: egui::FontId,
+    text_color: egui::Color32,
+) {
+    let max_width = (right_limit - name_x).max(0.0);
+    let (name_galley, marker_galley) = crate::page::layout_query_name(
+        ui,
+        &item.name,
+        item.unsaved,
+        font_id,
+        text_color,
+        max_width,
+    );
     let name_w = name_galley.size().x;
     let name_top = rect.center().y - name_galley.size().y / 2.0;
     ui.painter()
@@ -437,40 +452,21 @@ fn query_list_widget(
     if let Some(marker) = marker_galley {
         // Top-aligned (small font) so it reads as a raised superscript asterisk.
         ui.painter().galley(
-            egui::pos2(name_x + name_w + marker_gap, name_top),
+            egui::pos2(name_x + name_w + crate::page::MARKER_GAP, name_top),
             marker,
             text_color,
         );
     }
-
-    outcome.action = row_actions_menu(
-        ui,
-        item,
-        &response,
-        rect,
-        response.hovered(),
-        text_color,
-        weak_text,
-    );
-    outcome.clicked = response.clicked();
-    outcome
 }
 
-/// Draws the row's "⋮" actions button and wires up both its click-menu and the
-/// row's right-click context menu, returning the chosen action. The button is
-/// interacted every frame (a stable anchor keeps its popup open even once the row
-/// stops being hovered) but its glyph is only painted when `show_button` is set.
-/// It's interacted after the row so it sits on top and steals clicks from the
-/// row's navigation.
-fn row_actions_menu(
+/// The "⋮" actions button's rect and interaction for a row. Interacted here (not
+/// in [`row_actions_menu`]) so the row's name can reserve space for it before
+/// being laid out — the button steals the row's hover when the cursor is over it.
+fn actions_button(
     ui: &mut egui::Ui,
     item: &ListItem,
-    row: &egui::Response,
     rect: egui::Rect,
-    show_button: bool,
-    text_color: egui::Color32,
-    weak_text: egui::Color32,
-) -> Option<QueryAction> {
+) -> (egui::Rect, egui::Response) {
     let btn_size = 24.0;
     let btn_rect = egui::Rect::from_center_size(
         egui::pos2(rect.right() - btn_size / 2.0 - 2.0, rect.center().y),
@@ -481,7 +477,26 @@ fn row_actions_menu(
         egui::Id::new(("query-menu", item.id)),
         egui::Sense::click(),
     );
-    if show_button || btn_resp.hovered() {
+    (btn_rect, btn_resp)
+}
+
+/// Paints the row's "⋮" actions button (when the row or button is hovered) and
+/// wires up both its click-menu and the row's right-click context menu, returning
+/// the chosen action. The button is interacted by the caller every frame (a stable
+/// anchor keeps its popup open even once the row stops being hovered), after the
+/// row so it sits on top and steals clicks from the row's navigation.
+fn row_actions_menu(
+    ui: &mut egui::Ui,
+    item: &ListItem,
+    row: &egui::Response,
+    btn_rect: egui::Rect,
+    btn_resp: &egui::Response,
+    text_color: egui::Color32,
+    weak_text: egui::Color32,
+) -> Option<QueryAction> {
+    // Shown whenever the row or the button itself is hovered (matching the space
+    // the name reserves for it).
+    if row.hovered() || btn_resp.hovered() {
         let icon_font = icons::font_id(18.0);
         let icon_color = if btn_resp.hovered() {
             text_color
@@ -502,7 +517,7 @@ fn row_actions_menu(
     // saved query that has unsaved edits to revert.
     let show_revert = item.persisted && item.unsaved;
     let mut action = None;
-    if let Some(inner) = egui::Popup::menu(&btn_resp)
+    if let Some(inner) = egui::Popup::menu(btn_resp)
         .align(egui::RectAlign::BOTTOM_END)
         .show(|ui| query_actions_menu(ui, show_revert))
         && inner.inner.is_some()

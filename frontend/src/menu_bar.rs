@@ -12,9 +12,7 @@ use crate::App;
 use crate::button::Button;
 use crate::icons::{self, MaterialIcon};
 use crate::now_playing::menu_item;
-use crate::page::{
-    DELETE_RED, QueryAction, QueryPage, explorer_button, inline_rename_field, unsaved_marker_format,
-};
+use crate::page::{DELETE_RED, QueryAction, QueryPage, explorer_button, inline_rename_field};
 use crate::query_def::Section;
 use crate::{Rename, RenameSurface};
 
@@ -76,18 +74,13 @@ impl App {
                         toggle_organizer = true;
                     }
                     if has_page {
-                        ui.add_space(6.0);
-                        (begin_rename, rename_commit, rename_cancel) =
-                            draw_page_name(ui, &name, unsaved, rename, current_id);
-                        // The save button sits immediately after the name, shown
-                        // only while there are unsaved changes.
-                        if unsaved && Button::icon(icons::SAVE).show(ui).clicked() {
-                            save_now = true;
-                        }
-                    }
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.add_space(8.0);
-                        if has_page {
+                        // A small gap separating the name from the explorer toggle.
+                        ui.add_space(2.0);
+                        // Lay out the right-hand controls first so they claim their
+                        // space; whatever's left in the middle then goes to the
+                        // (truncating) query name and the conditional save button.
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.add_space(8.0);
                             match draw_page_menu_button(ui, &base_table, show_revert, &schema) {
                                 Some(PageMenu::Base(table)) => base_choice = Some(table),
                                 Some(PageMenu::Action(QueryAction::Rename)) => want_rename = true,
@@ -105,8 +98,30 @@ impl App {
                             {
                                 run_now = true;
                             }
-                        }
-                    });
+                            // The name + save button fill the remaining middle,
+                            // laid out left-aligned.
+                            ui.with_layout(
+                                egui::Layout::left_to_right(egui::Align::Center),
+                                |ui| {
+                                    // Reserve room for the save button (shown only
+                                    // when there are unsaved changes) so the name
+                                    // truncates before colliding with it.
+                                    let save_reserve = if unsaved {
+                                        crate::button::SIZE + ui.spacing().item_spacing.x
+                                    } else {
+                                        0.0
+                                    };
+                                    let name_avail = (ui.available_width() - save_reserve).max(0.0);
+                                    (begin_rename, rename_commit, rename_cancel) = draw_page_name(
+                                        ui, &name, unsaved, rename, current_id, name_avail,
+                                    );
+                                    if unsaved && Button::icon(icons::SAVE).show(ui).clicked() {
+                                        save_now = true;
+                                    }
+                                },
+                            );
+                        });
+                    }
                 });
             });
 
@@ -163,6 +178,7 @@ fn draw_page_name(
     unsaved: bool,
     rename: &mut Option<Rename>,
     current_id: Option<Uuid>,
+    max_width: f32,
 ) -> (bool, bool, bool) {
     let editing = rename
         .as_mut()
@@ -177,23 +193,30 @@ fn draw_page_name(
         );
         (false, res.commit, res.cancel)
     } else {
-        let mut job = egui::text::LayoutJob::default();
-        job.append(
-            name,
-            0.0,
-            egui::TextFormat {
-                font_id: egui::TextStyle::Body.resolve(ui.style()),
-                color: ui.visuals().text_color(),
-                ..Default::default()
-            },
-        );
-        if unsaved {
-            job.append(icons::UNSAVED.codepoint, 1.0, unsaved_marker_format());
+        // Lay out the name truncated to the available width (reserving room for
+        // the unsaved marker so it survives truncation), then render it via a
+        // `Label` for the double-click-to-rename interaction. We hand `Label` a
+        // pre-laid galley because it otherwise overrides a `LayoutJob`'s wrap
+        // with the ui's full available width.
+        let font_id = egui::TextStyle::Body.resolve(ui.style());
+        let color = ui.visuals().text_color();
+        let (name_galley, marker_galley) =
+            crate::page::layout_query_name(ui, name, unsaved, font_id, color, max_width);
+        let name_resp = ui.add(egui::Label::new(name_galley).sense(egui::Sense::click()));
+        if let Some(marker) = marker_galley {
+            // Allocate the marker's space so the save button follows it, and paint
+            // it top-aligned with the name for the raised superscript look.
+            let (mrect, _) = ui.allocate_exact_size(
+                egui::vec2(marker.size().x + crate::page::MARKER_GAP, marker.size().y),
+                egui::Sense::hover(),
+            );
+            ui.painter().galley(
+                egui::pos2(mrect.left() + crate::page::MARKER_GAP, name_resp.rect.top()),
+                marker,
+                color,
+            );
         }
-        let begin = ui
-            .add(egui::Label::new(job).sense(egui::Sense::click()))
-            .double_clicked();
-        (begin, false, false)
+        (name_resp.double_clicked(), false, false)
     }
 }
 
@@ -251,7 +274,8 @@ fn base_submenu(
         }
         let mut choice = None;
         for table in tables {
-            if ui.selectable_label(table == base_table, &table).clicked() {
+            let label = format!("{}  {table}", icons::TABLE.codepoint);
+            if ui.selectable_label(table == base_table, label).clicked() {
                 choice = Some(table);
             }
         }

@@ -11,7 +11,9 @@ use egui_material_icons::icons as mi;
 
 // Query sections.
 /// The query's source table.
-pub(crate) const BASE: MaterialIcon = mi::ICON_TABLE_CHART;
+pub(crate) const BASE: MaterialIcon = mi::ICON_PSYCHIATRY;
+/// An individual table, e.g. in the Base submenu's list of tables.
+pub(crate) const TABLE: MaterialIcon = mi::ICON_TABLE;
 pub(crate) const FILTER: MaterialIcon = mi::ICON_FILTER_ALT;
 pub(crate) const SORT: MaterialIcon = mi::ICON_SWAP_VERT;
 pub(crate) const DISPLAY: MaterialIcon = mi::ICON_KEY_VISUALIZER;
