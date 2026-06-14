@@ -9,6 +9,7 @@ use eframe::egui;
 use uuid::Uuid;
 
 use crate::QueryState;
+use crate::icons;
 use crate::now_playing::menu_item;
 use crate::rpc::Query;
 
@@ -28,16 +29,10 @@ pub(crate) enum QueryAction {
 pub(crate) fn query_actions_menu(ui: &mut egui::Ui) -> Option<QueryAction> {
     ui.set_width(130.0);
     let mut action = None;
-    if menu_item(ui, egui_phosphor::fill::PENCIL, "Rename", true, None).clicked() {
+    if menu_item(ui, icons::RENAME, "Rename", true, None).clicked() {
         action = Some(QueryAction::Rename);
     }
-    if menu_item(
-        ui,
-        egui_phosphor::fill::TRASH,
-        "Delete",
-        true,
-        Some(DELETE_RED),
-    )
+    if menu_item(ui, icons::DELETE, "Delete", true, Some(DELETE_RED))
     .clicked()
     {
         action = Some(QueryAction::Delete);
@@ -136,8 +131,8 @@ pub(crate) fn explorer_button(ui: &mut egui::Ui, active: bool) -> bool {
         ui.painter().text(
             rect.center(),
             egui::Align2::CENTER_CENTER,
-            egui_phosphor::bold::LIST,
-            egui::FontId::new(18.0, egui::FontFamily::Proportional),
+            icons::MENU.codepoint,
+            icons::font_id(18.0),
             icon_color,
         );
     }

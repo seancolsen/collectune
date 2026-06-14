@@ -8,6 +8,7 @@ use std::sync::{Arc, Mutex};
 use eframe::egui;
 use uuid::Uuid;
 
+use crate::icons::{self, MaterialIcon};
 use crate::page::{
     QueryAction, QueryPage, explorer_button, inline_rename_field, query_actions_menu,
 };
@@ -197,10 +198,7 @@ fn draw_page_name(
 /// The page's "⋮" actions button in the menu bar, opening the shared Rename/Delete
 /// menu for the current query. Returns the chosen action, if any.
 fn draw_page_menu_button(ui: &mut egui::Ui) -> Option<QueryAction> {
-    let dots = ui.add(
-        egui::Button::new(egui::RichText::new(egui_phosphor::bold::DOTS_THREE_VERTICAL).size(18.0))
-            .frame(false),
-    );
+    let dots = ui.add(egui::Button::new(icons::MORE.rich_text().size(18.0)).frame(false));
     let mut action = None;
     if let Some(inner) = egui::Popup::menu(&dots)
         .align(egui::RectAlign::TOP_END)
@@ -212,12 +210,12 @@ fn draw_page_menu_button(ui: &mut egui::Ui) -> Option<QueryAction> {
     action
 }
 
-/// The icon (and whether it's from the fill variant) for a section's button.
-fn section_icon(section: Section) -> (&'static str, bool) {
+/// The icon for a section's button.
+fn section_icon(section: Section) -> MaterialIcon {
     match section {
-        Section::Filter => (egui_phosphor::fill::FUNNEL, true),
-        Section::Sort => (egui_phosphor::bold::ARROWS_DOWN_UP, false),
-        Section::Display => (egui_phosphor::fill::TEXT_COLUMNS, true),
+        Section::Filter => icons::FILTER,
+        Section::Sort => icons::SORT,
+        Section::Display => icons::DISPLAY,
     }
 }
 
@@ -230,11 +228,9 @@ fn draw_section_buttons(ui: &mut egui::Ui, open: Option<Section>) -> Option<Sect
         sections.reverse();
     }
     for section in sections {
-        let (icon, fill) = section_icon(section);
         if icon_label_button(
             ui,
-            icon,
-            fill,
+            section_icon(section),
             section.label(),
             open == Some(section),
             false,
@@ -254,7 +250,7 @@ fn draw_base_button(
     base_table: &str,
     schema: &Arc<Mutex<Option<String>>>,
 ) -> Option<String> {
-    let resp = icon_label_button(ui, egui_phosphor::fill::LEGO, true, "Base", false, true);
+    let resp = icon_label_button(ui, icons::BASE, "Base", false, true);
     let mut choice = None;
     egui::Popup::menu(&resp).show(|ui| {
         ui.set_min_width(120.0);
@@ -296,24 +292,18 @@ fn table_names(schema_json: &str) -> Vec<String> {
 /// gives it the light-blue toggled background.
 pub(crate) fn icon_label_button(
     ui: &mut egui::Ui,
-    icon: &str,
-    fill_icon: bool,
+    icon: MaterialIcon,
     label: &str,
     active: bool,
     caret: bool,
 ) -> egui::Response {
     let color = ui.visuals().text_color();
-    let icon_family = if fill_icon {
-        egui::FontFamily::Name("phosphor-fill".into())
-    } else {
-        egui::FontFamily::Proportional
-    };
     let mut job = egui::text::LayoutJob::default();
     job.append(
-        icon,
+        icon.codepoint,
         0.0,
         egui::TextFormat {
-            font_id: egui::FontId::new(14.0, icon_family),
+            font_id: icons::font_id(14.0),
             color,
             ..Default::default()
         },
@@ -329,10 +319,10 @@ pub(crate) fn icon_label_button(
     );
     if caret {
         job.append(
-            egui_phosphor::bold::CARET_DOWN,
+            icons::EXPAND.codepoint,
             4.0,
             egui::TextFormat {
-                font_id: egui::FontId::proportional(10.0),
+                font_id: icons::font_id(10.0),
                 color,
                 ..Default::default()
             },
@@ -349,7 +339,7 @@ pub(crate) fn icon_label_button(
 /// Paints the wrench (query-builder) toggle shown on narrow screens, mirroring
 /// the explorer button's manual rendering but with a blue active fill.
 fn wrench_button(ui: &mut egui::Ui, active: bool) -> egui::Response {
-    let font = egui::FontId::new(18.0, egui::FontFamily::Name("phosphor-fill".into()));
+    let font = icons::font_id(18.0);
     let (rect, resp) = ui.allocate_exact_size(egui::vec2(26.0, 26.0), egui::Sense::click());
     if ui.is_rect_visible(rect) {
         if active {
@@ -366,7 +356,7 @@ fn wrench_button(ui: &mut egui::Ui, active: bool) -> egui::Response {
         ui.painter().text(
             rect.center(),
             egui::Align2::CENTER_CENTER,
-            egui_phosphor::fill::WRENCH,
+            icons::BUILDER.codepoint,
             font,
             icon_color,
         );
@@ -385,10 +375,7 @@ fn paint_run_save(
     let run = ui
         .add_enabled(
             run_enabled,
-            egui::Button::new(
-                egui::RichText::new(egui_phosphor::bold::ARROWS_CLOCKWISE).size(18.0),
-            )
-            .frame(false),
+            egui::Button::new(icons::RUN.rich_text().size(18.0)).frame(false),
         )
         .clicked();
     if running {
@@ -398,8 +385,7 @@ fn paint_run_save(
     if unsaved
         && ui
             .add(
-                egui::Button::new(egui::RichText::new(egui_phosphor::bold::FLOPPY_DISK).size(18.0))
-                    .frame(false),
+                egui::Button::new(icons::SAVE.rich_text().size(18.0)).frame(false),
             )
             .clicked()
     {

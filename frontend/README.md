@@ -4,7 +4,10 @@ Frontend application for Collectune.
 
 ## Icons
 
-https://phosphoricons.com/?weight=bold
+Icons come from [Material Symbols](https://fonts.google.com/icons) (outline style),
+via the [`egui_material_icons`](https://crates.io/crates/egui_material_icons) crate.
+App concepts are mapped to specific glyphs in [`src/icons.rs`](src/icons.rs); refer to
+those semantic names (e.g. `icons::SAVE`) rather than raw `ICON_*` constants.
 
 ## Result column display metadata
 

@@ -7,6 +7,7 @@ use eframe::egui;
 use uuid::Uuid;
 
 use crate::App;
+use crate::icons::{self, MaterialIcon};
 use crate::menu_bar::icon_label_button;
 use crate::now_playing::menu_item;
 use crate::page::DELETE_RED;
@@ -109,14 +110,12 @@ impl App {
                     if let Some(choice) = dots_menu(ui, |ui| {
                         let mut choice = None;
                         let has_text = !custom.trim().is_empty();
-                        if menu_item(ui, egui_phosphor::fill::BACKSPACE, "Clear", has_text, None)
-                            .clicked()
-                        {
+                        if menu_item(ui, icons::CLEAR, "Clear", has_text, None).clicked() {
                             choice = Some(false);
                         }
                         if menu_item(
                             ui,
-                            egui_phosphor::fill::FLOPPY_DISK,
+                            icons::SAVE,
                             "Save as preset",
                             has_text && base_chosen,
                             None,
@@ -167,27 +166,13 @@ impl App {
             .collect();
         let filter_choice = options_menu(ui, Section::Filter, |ui| {
             let mut choice = None;
-            if menu_item(
-                ui,
-                egui_phosphor::fill::ARROW_COUNTER_CLOCKWISE,
-                "Reset to default",
-                true,
-                None,
-            )
-            .clicked()
-            {
+            if menu_item(ui, icons::RESET, "Reset to default", true, None).clicked() {
                 choice = Some(OptionsChoice::Reset);
             }
             if let Some(id) = preset_submenu(ui, "Add Preset", &addable) {
                 choice = Some(OptionsChoice::UsePreset(id));
             }
-            if menu_item(
-                ui,
-                egui_phosphor::fill::TOOLBOX,
-                "Manage all presets",
-                true,
-                None,
-            )
+            if menu_item(ui, icons::MANAGE_PRESETS, "Manage all presets", true, None)
             .clicked()
             {
                 choice = Some(OptionsChoice::Manage);
@@ -243,20 +228,12 @@ impl App {
                 let has_text = !text.trim().is_empty();
                 options_menu(ui, section, |ui| {
                     let mut choice = None;
-                    if menu_item(
-                        ui,
-                        egui_phosphor::fill::ARROW_COUNTER_CLOCKWISE,
-                        "Reset to default",
-                        true,
-                        None,
-                    )
-                    .clicked()
-                    {
+                    if menu_item(ui, icons::RESET, "Reset to default", true, None).clicked() {
                         choice = Some(OptionsChoice::Reset);
                     }
                     if menu_item(
                         ui,
-                        egui_phosphor::fill::FLOPPY_DISK,
+                        icons::SAVE,
                         "Save as preset",
                         has_text && base_chosen,
                         None,
@@ -270,7 +247,7 @@ impl App {
                     }
                     if menu_item(
                         ui,
-                        egui_phosphor::fill::TOOLBOX,
+                        icons::MANAGE_PRESETS,
                         &format!("Manage {} presets", noun.to_lowercase()),
                         true,
                         None,
@@ -287,31 +264,13 @@ impl App {
                 self.preset_block(ui, &format!("PRESET {}", noun.to_uppercase()), id, false);
                 options_menu(ui, section, |ui| {
                     let mut choice = None;
-                    if menu_item(
-                        ui,
-                        egui_phosphor::fill::ARROW_COUNTER_CLOCKWISE,
-                        "Reset to default",
-                        true,
-                        None,
-                    )
-                    .clicked()
-                    {
+                    if menu_item(ui, icons::RESET, "Reset to default", true, None).clicked() {
                         choice = Some(OptionsChoice::Reset);
                     }
-                    if menu_item(
-                        ui,
-                        egui_phosphor::fill::SWAP,
-                        "Convert to custom",
-                        true,
-                        None,
-                    )
-                    .clicked()
-                    {
+                    if menu_item(ui, icons::CONVERT, "Convert to custom", true, None).clicked() {
                         choice = Some(OptionsChoice::ConvertToCustom);
                     }
-                    if menu_item(ui, egui_phosphor::fill::WRENCH, "Edit preset", true, None)
-                        .clicked()
-                    {
+                    if menu_item(ui, icons::BUILDER, "Edit preset", true, None).clicked() {
                         choice = Some(OptionsChoice::EditPreset(id));
                     }
                     if let Some(id) = preset_submenu(ui, "Replace with preset", &available) {
@@ -319,7 +278,7 @@ impl App {
                     }
                     if menu_item(
                         ui,
-                        egui_phosphor::fill::TOOLBOX,
+                        icons::MANAGE_PRESETS,
                         &format!("Manage {} presets", noun.to_lowercase()),
                         true,
                         None,
@@ -392,16 +351,12 @@ impl App {
                     ui.horizontal(|ui| {
                         small_heading(ui, heading);
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            revert = icon_button(ui, egui_phosphor::bold::ARROW_COUNTER_CLOCKWISE)
-                                .clicked();
+                            revert = icon_button(ui, icons::RESET).clicked();
                             save = ui
                                 .add_enabled(
                                     !edit.name.trim().is_empty(),
-                                    egui::Button::new(
-                                        egui::RichText::new(egui_phosphor::bold::FLOPPY_DISK)
-                                            .size(16.0),
-                                    )
-                                    .frame(false),
+                                    egui::Button::new(icons::SAVE.rich_text().size(16.0))
+                                        .frame(false),
                                 )
                                 .clicked();
                             ui.add_sized(
@@ -429,30 +384,15 @@ impl App {
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             action = dots_menu(ui, |ui| {
                                 let mut choice = None;
-                                if menu_item(ui, egui_phosphor::bold::X, "Remove", true, None)
-                                    .clicked()
-                                {
+                                if menu_item(ui, icons::CLOSE, "Remove", true, None).clicked() {
                                     choice = Some(PresetBlockAction::Remove);
                                 }
-                                if menu_item(
-                                    ui,
-                                    egui_phosphor::fill::WRENCH,
-                                    "Edit preset",
-                                    true,
-                                    None,
-                                )
-                                .clicked()
+                                if menu_item(ui, icons::BUILDER, "Edit preset", true, None).clicked()
                                 {
                                     choice = Some(PresetBlockAction::Edit);
                                 }
-                                if menu_item(
-                                    ui,
-                                    egui_phosphor::fill::SWAP,
-                                    "Merge into custom",
-                                    true,
-                                    None,
-                                )
-                                .clicked()
+                                if menu_item(ui, icons::CONVERT, "Merge into custom", true, None)
+                                    .clicked()
                                 {
                                     choice = Some(PresetBlockAction::MergeIntoCustom);
                                 }
@@ -665,9 +605,7 @@ impl App {
                         ui.weak(section.noun().to_lowercase());
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        let trash = egui::RichText::new(egui_phosphor::fill::TRASH)
-                            .size(14.0)
-                            .color(DELETE_RED);
+                        let trash = icons::DELETE.rich_text().size(14.0).color(DELETE_RED);
                         if ui.add(egui::Button::new(trash).frame(false)).clicked() {
                             delete = Some(*id);
                         }
@@ -733,16 +671,13 @@ fn code_editor(ui: &mut egui::Ui, text: &mut String, rows: usize, run: &mut bool
 }
 
 /// A frameless icon button sized to match the other toolbar glyphs.
-fn icon_button(ui: &mut egui::Ui, icon: &str) -> egui::Response {
-    ui.add(egui::Button::new(egui::RichText::new(icon).size(16.0)).frame(false))
+fn icon_button(ui: &mut egui::Ui, icon: MaterialIcon) -> egui::Response {
+    ui.add(egui::Button::new(icon.rich_text().size(16.0)).frame(false))
 }
 
 /// A `⋮` button opening a popup menu; returns the menu's chosen value, if any.
 fn dots_menu<T>(ui: &mut egui::Ui, content: impl FnOnce(&mut egui::Ui) -> Option<T>) -> Option<T> {
-    let dots = ui.add(
-        egui::Button::new(egui::RichText::new(egui_phosphor::bold::DOTS_THREE_VERTICAL).size(16.0))
-            .frame(false),
-    );
+    let dots = ui.add(egui::Button::new(icons::MORE.rich_text().size(16.0)).frame(false));
     egui::Popup::menu(&dots)
         .align(egui::RectAlign::BOTTOM_END)
         .show(|ui| {
@@ -763,7 +698,7 @@ fn options_menu<T>(
     ui.add_space(4.0);
     ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
         let label = format!("{} options", section.noun());
-        let resp = icon_label_button(ui, egui_phosphor::fill::GEAR_SIX, true, &label, false, true);
+        let resp = icon_label_button(ui, icons::OPTIONS, &label, false, true);
         choice = egui::Popup::menu(&resp)
             .align(egui::RectAlign::BOTTOM_END)
             .show(|ui| {
@@ -776,10 +711,10 @@ fn options_menu<T>(
 }
 
 /// A "… ▶" submenu listing presets by name. Returns the clicked preset id.
-/// The bold stamp glyph is inlined in the label text (bold Phosphor icons live
-/// in the proportional font's fallback, unlike the fill variant).
+/// The preset glyph is inlined in the label text; Material Symbols are
+/// registered as a fallback on the proportional family, so it renders inline.
 fn preset_submenu(ui: &mut egui::Ui, label: &str, presets: &[(Uuid, String)]) -> Option<Uuid> {
-    let label = format!("{}  {label}", egui_phosphor::bold::STAMP);
+    let label = format!("{}  {label}", icons::PRESET.codepoint);
     let (_, inner) = egui::containers::menu::SubMenuButton::new(label).ui(ui, |ui| {
         ui.set_min_width(150.0);
         let mut choice = None;

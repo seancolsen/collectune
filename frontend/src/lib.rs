@@ -13,6 +13,7 @@ mod compile;
 mod field_layout;
 mod format;
 mod http;
+mod icons;
 mod lineage;
 mod menu_bar;
 mod now_playing;
@@ -53,21 +54,11 @@ pub(crate) const ACCENT_BLUE: egui::Color32 = egui::Color32::from_rgb(0x2E, 0x7C
 pub fn setup_fonts(ctx: &egui::Context) {
     ctx.set_visuals(egui::Visuals::light());
     let mut fonts = egui::FontDefinitions::default();
-    egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Bold);
-    // Load fill as a separate named family so it doesn't overwrite bold's "phosphor" key.
-    fonts.font_data.insert(
-        "phosphor-fill".into(),
-        egui_phosphor::Variant::Fill.font_data().into(),
-    );
-    fonts.families.insert(
-        egui::FontFamily::Name("phosphor-fill".into()),
-        vec!["phosphor-fill".into()],
-    );
 
     // Bundle our own faces so the UI doesn't depend on system-installed fonts:
     // Noto Sans for proportional text, Noto Sans Mono for monospace. Insert each
     // at the front of its family so it's the primary face while keeping egui's
-    // default fallbacks (emoji/CJK coverage) and the phosphor icon font behind it.
+    // default fallbacks (emoji/CJK coverage) behind it.
     fonts.font_data.insert(
         "noto-sans".into(),
         egui::FontData::from_static(include_bytes!("../fonts/NotoSans-Regular.ttf")).into(),
@@ -88,6 +79,10 @@ pub fn setup_fonts(ctx: &egui::Context) {
         .insert(0, "noto-sans-mono".into());
 
     ctx.set_fonts(fonts);
+
+    // Register the Material Symbols outline font (adds it as a named family and
+    // as a low-priority fallback on the proportional family).
+    egui_material_icons::initialize(ctx);
 }
 
 #[derive(Default)]

@@ -8,6 +8,7 @@ use std::sync::Arc;
 use eframe::egui;
 use uuid::Uuid;
 
+use crate::icons;
 use crate::page::{QueryAction, inline_rename_field, query_actions_menu};
 use crate::{
     ACCENT_BLUE, App, ORGANIZER_DRAG_FRICTION, ORGANIZER_SWIPE_VELOCITY, ORGANIZER_WIDTH, Rename,
@@ -259,7 +260,7 @@ fn draw_query_list(
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.add_space(12.0);
             if ui
-                .button(egui::RichText::new(egui_phosphor::bold::PLUS).size(16.0))
+                .button(icons::ADD.rich_text().size(16.0))
                 .clicked()
             {
                 actions.add = true;
@@ -276,7 +277,7 @@ fn draw_query_list(
                 .desired_width(ORGANIZER_WIDTH - 72.0),
         );
         if ui
-            .button(egui::RichText::new(egui_phosphor::bold::ARROWS_CLOCKWISE).size(14.0))
+            .button(icons::REFRESH.rich_text().size(14.0))
             .clicked()
         {
             actions.refresh = true;
@@ -452,7 +453,7 @@ fn row_actions_menu(
         egui::Sense::click(),
     );
     if show_button || btn_resp.hovered() {
-        let icon_font = egui::FontId::new(18.0, egui::FontFamily::Name("phosphor-fill".into()));
+        let icon_font = icons::font_id(18.0);
         let icon_color = if btn_resp.hovered() {
             text_color
         } else {
@@ -461,7 +462,7 @@ fn row_actions_menu(
         ui.painter().text(
             btn_rect.center(),
             egui::Align2::CENTER_CENTER,
-            egui_phosphor::fill::DOTS_THREE_OUTLINE_VERTICAL,
+            icons::MORE.codepoint,
             icon_font,
             icon_color,
         );

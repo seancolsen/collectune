@@ -6,6 +6,7 @@ use std::time::Duration;
 use eframe::egui;
 use uuid::Uuid;
 
+use crate::icons::{self, MaterialIcon};
 use crate::{ACCENT_BLUE, App};
 
 #[derive(Clone)]
@@ -215,13 +216,13 @@ impl App {
         let mut toggle = false;
         let mut action: Option<MenuAction> = None;
 
-        let icon_font = egui::FontId::new(18.0, egui::FontFamily::Name("phosphor-fill".into()));
+        let icon_font = icons::font_id(18.0);
         let icon_char = if playing {
-            egui_phosphor::fill::PAUSE
+            icons::PAUSE.codepoint
         } else {
-            egui_phosphor::fill::PLAY
+            icons::PLAY.codepoint
         };
-        let menu_icon_char = egui_phosphor::fill::DOTS_THREE_OUTLINE_VERTICAL;
+        let menu_icon_char = icons::MORE.codepoint;
         let visuals = ui.visuals().clone();
 
         let button_size = egui::vec2(26.0, 26.0);
@@ -275,32 +276,16 @@ impl App {
             .align(egui::RectAlign::TOP_END)
             .width(130.0)
             .show(|ui| {
-                if menu_item(
-                    ui,
-                    egui_phosphor::fill::SKIP_FORWARD,
-                    "Next",
-                    can_next,
-                    None,
-                )
-                .clicked()
-                {
+                if menu_item(ui, icons::NEXT, "Next", can_next, None).clicked() {
                     action = Some(MenuAction::Next);
                 }
-                if menu_item(ui, egui_phosphor::bold::X, "Close", true, None).clicked() {
+                if menu_item(ui, icons::CLOSE, "Close", true, None).clicked() {
                     action = Some(MenuAction::Close);
                 }
-                if menu_item(
-                    ui,
-                    egui_phosphor::fill::CROSSHAIR,
-                    "Locate",
-                    can_locate,
-                    None,
-                )
-                .clicked()
-                {
+                if menu_item(ui, icons::LOCATE, "Locate", can_locate, None).clicked() {
                     action = Some(MenuAction::Locate);
                 }
-                let _ = menu_item(ui, egui_phosphor::fill::PENCIL, "Edit", true, None);
+                let _ = menu_item(ui, icons::EDIT, "Edit", true, None);
             });
 
         (toggle, action)
@@ -407,7 +392,7 @@ fn draw_now_playing_timeline(
 /// destructive action); disabled items always use the weak text color.
 pub(crate) fn menu_item(
     ui: &mut egui::Ui,
-    icon: &str,
+    icon: MaterialIcon,
     label: &str,
     enabled: bool,
     tint: Option<egui::Color32>,
@@ -435,14 +420,14 @@ pub(crate) fn menu_item(
         visuals.weak_text_color()
     };
 
-    let icon_font = egui::FontId::new(icon_size, egui::FontFamily::Name("phosphor-fill".into()));
+    let icon_font = icons::font_id(icon_size);
     let label_font = egui::FontId::proportional(label_size);
     let pad_x = 10.0;
     let icon_x = rect.left() + pad_x;
     ui.painter().text(
         egui::pos2(icon_x, rect.center().y),
         egui::Align2::LEFT_CENTER,
-        icon,
+        icon.codepoint,
         icon_font,
         text_color,
     );
