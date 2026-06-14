@@ -213,6 +213,13 @@ impl Default for App {
 }
 
 impl eframe::App for App {
+    // eframe 0.34 made `ui` the required entry point and deprecated `update`,
+    // but it still calls `update` every frame (before `ui`). We keep all the
+    // work in `update` — which renders its own panels on the context — and leave
+    // `ui` (handed a bare root `Ui`) empty.
+    fn ui(&mut self, _ui: &mut egui::Ui, _frame: &mut eframe::Frame) {}
+
+    #[expect(deprecated)]
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.bootstrap(ctx);
         self.drain_loaded_queries();
