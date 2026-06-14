@@ -19,6 +19,13 @@ const CUSTOM_BG: egui::Color32 = egui::Color32::from_rgb(0xDD, 0xF3, 0xF8);
 /// Background of a preset block.
 const PRESET_BG: egui::Color32 = egui::Color32::from_rgb(0xFB, 0xF4, 0xC9);
 
+/// Smallest height the builder panel will shrink to, so an empty/"no query"
+/// state still has a sane size.
+const MIN_BUILDER_HEIGHT: f32 = 80.0;
+/// Vertical margin of the panel's `Frame::side_top_panel` (`symmetric(8, 2)`),
+/// added around the measured content so the panel is exactly tall enough.
+const FRAME_V_MARGIN: f32 = 4.0;
+
 /// The "save as preset" naming dialog: which section is being saved and the
 /// Querydown fragment to store.
 pub(crate) struct PresetSave {
@@ -59,7 +66,15 @@ impl App {
         let Some(section) = self.builder_section else {
             return;
         };
-        let height = ui.available_rect_before_wrap().height() * 0.35;
+        // egui panels fix their height before rendering and clip any overflow;
+        // they don't size to content. So we drive the height from the previous
+        // frame's measured content height (captured below via the ScrollArea's
+        // `content_size`), clamped to a sane minimum and to 60% of the window.
+        let max_h = ui.ctx().content_rect().height() * 0.5;
+        let content_h = self
+            .builder_content_height
+            .map_or(max_h, |h| h + FRAME_V_MARGIN);
+        let height = content_h.clamp(MIN_BUILDER_HEIGHT, max_h);
         // Edit a local copy of the definition so rendering can freely borrow
         // other parts of `self` (presets, modal state); written back below.
         let mut def = self.current_page().map(|p| p.live.definition.clone());
@@ -67,7 +82,7 @@ impl App {
         egui::Panel::top("query_builder")
             .exact_size(height)
             .show_inside(ui, |ui| {
-                egui::ScrollArea::vertical().show(ui, |ui| {
+                let output = egui::ScrollArea::vertical().show(ui, |ui| {
                     let Some(def) = def.as_mut() else {
                         ui.weak("No query selected.");
                         return;
@@ -81,6 +96,17 @@ impl App {
                     }
                     ui.add_space(6.0);
                 });
+                // Feed this frame's natural content height back for the next
+                // frame. Use a tolerance so sub-pixel jitter doesn't trigger a
+                // permanent repaint loop (which would peg the CPU).
+                let measured = output.content_size.y;
+                if self
+                    .builder_content_height
+                    .is_none_or(|h| (h - measured).abs() > 0.5)
+                {
+                    self.builder_content_height = Some(measured);
+                    ui.ctx().request_repaint();
+                }
             });
         if let Some(def) = def
             && let Some(page) = self.current_page_mut()

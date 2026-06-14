@@ -151,6 +151,10 @@ pub struct App {
     pub(crate) pending_delete: Option<PendingDelete>,
     /// Which query-builder section (filter/sort/display) is open, if any.
     pub(crate) builder_section: Option<Section>,
+    /// Last measured natural height of the query-builder content, used to size
+    /// the builder panel to fit its contents (see `render_builder_panel`).
+    /// `None` until the first frame has measured it.
+    pub(crate) builder_content_height: Option<f32>,
     /// All saved presets (every table and section), fetched at startup and kept
     /// in sync locally as the user adds/edits/deletes them.
     pub(crate) presets: Vec<rpc::Preset>,
@@ -189,6 +193,7 @@ impl Default for App {
             rename: None,
             pending_delete: None,
             builder_section: None,
+            builder_content_height: None,
             presets: Vec::new(),
             loaded_presets: Arc::new(Mutex::new(None)),
             presets_fetch_started: false,
