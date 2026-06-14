@@ -79,6 +79,10 @@ impl App {
         // other parts of `self` (presets, modal state); written back below.
         let mut def = self.current_page().map(|p| p.live.definition.clone());
         let mut run = false;
+        // The options popup hangs off the active section's toolbar button, whose
+        // menu trigger the menu bar captured into `section_menu_anchor` earlier
+        // this frame.
+        let trigger = self.section_menu_anchor.clone();
         egui::Panel::top("query_builder")
             .exact_size(height)
             .show_inside(ui, |ui| {
@@ -88,10 +92,11 @@ impl App {
                         return;
                     };
                     ui.add_space(6.0);
+                    let trigger = trigger.as_ref();
                     match section {
-                        Section::Filter => self.filter_builder_ui(ui, def, &mut run),
+                        Section::Filter => self.filter_builder_ui(ui, def, trigger, &mut run),
                         Section::Sort | Section::Display => {
-                            self.single_builder_ui(ui, section, def, &mut run);
+                            self.single_builder_ui(ui, section, def, trigger, &mut run);
                         }
                     }
                     ui.add_space(6.0);
@@ -123,7 +128,13 @@ impl App {
     // One linear pass over the section's blocks and menus; splitting it up
     // would just scatter the collected actions.
     #[allow(clippy::too_many_lines)]
-    fn filter_builder_ui(&mut self, ui: &mut egui::Ui, def: &mut QueryDefinition, run: &mut bool) {
+    fn filter_builder_ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        def: &mut QueryDefinition,
+        trigger: Option<&egui::Response>,
+        run: &mut bool,
+    ) {
         let base_chosen = def.is_runnable();
         let mut save_as = None;
         let mut block_action = None;
@@ -190,7 +201,7 @@ impl App {
             .into_iter()
             .filter(|(id, _)| !def.filter.presets.contains(id))
             .collect();
-        let filter_choice = options_menu(ui, Section::Filter, |ui| {
+        let filter_choice = options_menu(trigger, |ui| {
             let mut choice = None;
             if menu_item(ui, icons::RESET, "Reset to default", true, None).clicked() {
                 choice = Some(OptionsChoice::Reset);
@@ -230,6 +241,7 @@ impl App {
         ui: &mut egui::Ui,
         section: Section,
         def: &mut QueryDefinition,
+        trigger: Option<&egui::Response>,
         run: &mut bool,
     ) {
         let base_chosen = def.is_runnable();
@@ -250,7 +262,7 @@ impl App {
                     code_editor(ui, text, 5, run);
                 });
                 let has_text = !text.trim().is_empty();
-                options_menu(ui, section, |ui| {
+                options_menu(trigger, |ui| {
                     let mut choice = None;
                     if menu_item(ui, icons::RESET, "Reset to default", true, None).clicked() {
                         choice = Some(OptionsChoice::Reset);
@@ -286,7 +298,7 @@ impl App {
             SectionContent::Preset(id) => {
                 let id = *id;
                 self.preset_block(ui, &format!("PRESET {}", noun.to_uppercase()), id, false);
-                options_menu(ui, section, |ui| {
+                options_menu(trigger, |ui| {
                     let mut choice = None;
                     if menu_item(ui, icons::RESET, "Reset to default", true, None).clicked() {
                         choice = Some(OptionsChoice::Reset);
@@ -707,30 +719,22 @@ fn dots_menu<T>(ui: &mut egui::Ui, content: impl FnOnce(&mut egui::Ui) -> Option
         .and_then(|inner| inner.inner)
 }
 
-/// The right-aligned "⚙ <Section> options ▾" button below a builder section,
-/// opening the given menu. Returns the menu's chosen value, if any.
+/// A builder section's options menu, hung off the section's toolbar button via
+/// its embedded "⋮" menu `trigger`. Returns the menu's chosen value, if any. A
+/// `None` trigger (the section button isn't showing one this frame) yields no
+/// menu.
 fn options_menu<T>(
-    ui: &mut egui::Ui,
-    section: Section,
+    trigger: Option<&egui::Response>,
     content: impl FnOnce(&mut egui::Ui) -> Option<T>,
 ) -> Option<T> {
-    let mut choice = None;
-    ui.add_space(4.0);
-    ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
-        let label = format!("{} options", section.noun());
-        let resp = Button::icon(icons::OPTIONS)
-            .label(label)
-            .caret(true)
-            .show(ui);
-        choice = egui::Popup::menu(&resp)
-            .align(egui::RectAlign::BOTTOM_END)
-            .show(|ui| {
-                ui.set_width(190.0);
-                content(ui)
-            })
-            .and_then(|inner| inner.inner);
-    });
-    choice
+    let trigger = trigger?;
+    egui::Popup::menu(trigger)
+        .align(egui::RectAlign::BOTTOM_END)
+        .show(|ui| {
+            ui.set_width(190.0);
+            content(ui)
+        })
+        .and_then(|inner| inner.inner)
 }
 
 /// A "… ▶" submenu listing presets by name. Returns the clicked preset id.

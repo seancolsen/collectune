@@ -27,8 +27,6 @@ pub(crate) const EXPLORER_CLOSE: MaterialIcon = mi::ICON_LEFT_PANEL_CLOSE;
 pub(crate) const EXPLORER_OPEN: MaterialIcon = mi::ICON_LEFT_PANEL_OPEN;
 /// The superscript asterisk marking a query with unsaved changes.
 pub(crate) const UNSAVED: MaterialIcon = mi::ICON_EMERGENCY;
-/// A dropdown caret appended after a button's label.
-pub(crate) const EXPAND: MaterialIcon = mi::ICON_EXPAND_MORE;
 pub(crate) const ADD: MaterialIcon = mi::ICON_ADD;
 pub(crate) const RENAME: MaterialIcon = mi::ICON_EDIT;
 pub(crate) const EDIT: MaterialIcon = mi::ICON_EDIT;
@@ -45,8 +43,6 @@ pub(crate) const REVERT: MaterialIcon = mi::ICON_UNDO;
 pub(crate) const RUN: MaterialIcon = mi::ICON_REFRESH;
 /// Reload a list from the backend.
 pub(crate) const REFRESH: MaterialIcon = mi::ICON_REFRESH;
-/// A section's gear/options menu.
-pub(crate) const OPTIONS: MaterialIcon = mi::ICON_SETTINGS;
 /// The query-builder (wrench) toggle, and editing a preset's definition.
 pub(crate) const BUILDER: MaterialIcon = mi::ICON_BUILD;
 

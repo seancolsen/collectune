@@ -151,6 +151,10 @@ pub struct App {
     pub(crate) pending_delete: Option<PendingDelete>,
     /// Which query-builder section (filter/sort/display) is open, if any.
     pub(crate) builder_section: Option<Section>,
+    /// The active section button's embedded "⋮" menu trigger, captured each
+    /// frame by the menu bar so the builder panel (rendered just after) can
+    /// anchor that section's options popup to the toolbar button.
+    pub(crate) section_menu_anchor: Option<egui::Response>,
     /// Last measured natural height of the query-builder content, used to size
     /// the builder panel to fit its contents (see `render_builder_panel`).
     /// `None` until the first frame has measured it.
@@ -193,6 +197,7 @@ impl Default for App {
             rename: None,
             pending_delete: None,
             builder_section: None,
+            section_menu_anchor: None,
             builder_content_height: None,
             presets: Vec::new(),
             loaded_presets: Arc::new(Mutex::new(None)),

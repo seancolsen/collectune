@@ -9,7 +9,7 @@ use eframe::egui;
 use uuid::Uuid;
 
 use crate::App;
-use crate::button::Button;
+use crate::button::{Button, SplitButton};
 use crate::icons::{self, MaterialIcon};
 use crate::now_playing::menu_item;
 use crate::page::{DELETE_RED, QueryAction, QueryPage, explorer_button, inline_rename_field};
@@ -48,6 +48,7 @@ impl App {
 
         let mut toggle_organizer = false;
         let mut section_clicked = None;
+        let mut section_menu_anchor = None;
         let mut base_choice = None;
         let mut run_now = false;
         let mut save_now = false;
@@ -88,7 +89,9 @@ impl App {
                                 Some(PageMenu::Action(QueryAction::Delete)) => want_delete = true,
                                 None => {}
                             }
-                            section_clicked = draw_section_buttons(ui, builder_section);
+                            let sections = draw_section_buttons(ui, builder_section);
+                            section_clicked = sections.clicked;
+                            section_menu_anchor = sections.menu;
                             ui.separator();
                             if Button::icon(icons::RUN)
                                 .enabled(!running)
@@ -124,6 +127,11 @@ impl App {
                     }
                 });
             });
+
+        // Hand the active section's menu trigger to the builder panel (rendered
+        // just below this bar, in the same frame) so it can anchor that section's
+        // options popup to the toolbar button.
+        self.section_menu_anchor = section_menu_anchor;
 
         if toggle_organizer {
             self.organizer.open = !self.organizer.open;
@@ -293,25 +301,39 @@ fn section_icon(section: Section) -> MaterialIcon {
     }
 }
 
+/// The outcome of drawing the Filter/Sort/Display toggle buttons.
+struct SectionButtons {
+    /// The section whose main area was clicked (toggles the builder), if any.
+    clicked: Option<Section>,
+    /// The active section's embedded "⋮" menu trigger, to anchor its options
+    /// popup. At most one section is active, so at most one trigger exists.
+    menu: Option<egui::Response>,
+}
+
 /// Draws the Filter/Sort/Display toggle buttons in the `ui`'s layout direction.
-/// Returns the clicked section, if any.
-fn draw_section_buttons(ui: &mut egui::Ui, open: Option<Section>) -> Option<Section> {
-    let mut clicked = None;
+/// Each is a [`SplitButton`]: its main area toggles the builder section, and
+/// while active it shows a menu trigger for that section's options.
+fn draw_section_buttons(ui: &mut egui::Ui, open: Option<Section>) -> SectionButtons {
+    let mut out = SectionButtons {
+        clicked: None,
+        menu: None,
+    };
     let mut sections = [Section::Filter, Section::Sort, Section::Display];
     if ui.layout().main_dir() == egui::Direction::RightToLeft {
         sections.reverse();
     }
     for section in sections {
-        if Button::icon(section_icon(section))
-            .label(section.label())
+        let resp = SplitButton::new(section_icon(section), section.label())
             .active(open == Some(section))
-            .show(ui)
-            .clicked()
-        {
-            clicked = Some(section);
+            .show(ui);
+        if resp.main.clicked() {
+            out.clicked = Some(section);
+        }
+        if let Some(menu) = resp.menu {
+            out.menu = Some(menu);
         }
     }
-    clicked
+    out
 }
 
 /// The table names from the Querydown schema JSON.
