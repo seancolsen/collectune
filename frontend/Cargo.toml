@@ -21,7 +21,7 @@ arrow-cast = "56"
 arrow-ipc = "56"
 bytes = "1"
 eframe = "0.34"
-egui_material_icons = { version = "0.6", default-features = false, features = ["outline"] }
+egui_material_icons = { version = "0.6", default-features = false, features = ["filled"] }
 futures-util = "0.3"
 jiff = "0.2"
 polyglot-sql = { version = "0.4", default-features = false, features = ["semantic", "dialect-duckdb", "dialect-postgresql", "transpile"] }

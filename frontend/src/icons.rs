@@ -57,9 +57,11 @@ pub(crate) const NEXT: MaterialIcon = mi::ICON_SKIP_NEXT;
 /// Scroll the results to the now-playing track.
 pub(crate) const LOCATE: MaterialIcon = mi::ICON_MY_LOCATION;
 
-/// The egui font family that renders Material Symbols outline glyphs.
+/// The egui font family that renders Material Symbols glyphs. Derived from an
+/// icon so it always matches the active style (filled vs outline) selected by
+/// the crate's feature flags, keeping that choice to the one line in Cargo.toml.
 pub(crate) fn family() -> egui::FontFamily {
-    egui::FontFamily::Name(egui_material_icons::FONT_FAMILY_OUTLINED.into())
+    BASE.font_family()
 }
 
 /// A [`egui::FontId`] for painting an icon glyph at `size`.
