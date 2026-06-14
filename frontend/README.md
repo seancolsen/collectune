@@ -4,7 +4,7 @@ Frontend application for Collectune.
 
 ## Icons
 
-Icons come from [Material Symbols](https://fonts.google.com/icons) (outline style),
+Icons come from [Material Symbols](https://fonts.google.com/icons?icon.set=Material+Symbols&icon.size=24&icon.color=%231f1f1f&icon.style=Rounded) ("fill" style),
 via the [`egui_material_icons`](https://crates.io/crates/egui_material_icons) crate.
 App concepts are mapped to specific glyphs in [`src/icons.rs`](src/icons.rs); refer to
 those semantic names (e.g. `icons::SAVE`) rather than raw `ICON_*` constants.
