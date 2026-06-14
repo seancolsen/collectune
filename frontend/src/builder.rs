@@ -55,18 +55,18 @@ enum PresetBlockAction {
 
 impl App {
     /// The top panel below the menu bar holding the open builder section.
-    pub(crate) fn render_builder_panel(&mut self, ctx: &egui::Context) {
+    pub(crate) fn render_builder_panel(&mut self, ui: &mut egui::Ui) {
         let Some(section) = self.builder_section else {
             return;
         };
-        let height = ctx.available_rect().height() * 0.35;
+        let height = ui.available_rect_before_wrap().height() * 0.35;
         // Edit a local copy of the definition so rendering can freely borrow
         // other parts of `self` (presets, modal state); written back below.
         let mut def = self.current_page().map(|p| p.live.definition.clone());
         let mut run = false;
-        egui::TopBottomPanel::top("query_builder")
-            .exact_height(height)
-            .show(ctx, |ui| {
+        egui::Panel::top("query_builder")
+            .exact_size(height)
+            .show_inside(ui, |ui| {
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     let Some(def) = def.as_mut() else {
                         ui.weak("No query selected.");
@@ -88,7 +88,7 @@ impl App {
             page.live.definition = def;
         }
         if run {
-            self.run_query(ctx);
+            self.run_query(ui.ctx());
         }
     }
 
@@ -172,9 +172,7 @@ impl App {
             if let Some(id) = preset_submenu(ui, "Add Preset", &addable) {
                 choice = Some(OptionsChoice::UsePreset(id));
             }
-            if menu_item(ui, icons::MANAGE_PRESETS, "Manage all presets", true, None)
-            .clicked()
-            {
+            if menu_item(ui, icons::MANAGE_PRESETS, "Manage all presets", true, None).clicked() {
                 choice = Some(OptionsChoice::Manage);
             }
             choice
@@ -387,7 +385,8 @@ impl App {
                                 if menu_item(ui, icons::CLOSE, "Remove", true, None).clicked() {
                                     choice = Some(PresetBlockAction::Remove);
                                 }
-                                if menu_item(ui, icons::BUILDER, "Edit preset", true, None).clicked()
+                                if menu_item(ui, icons::BUILDER, "Edit preset", true, None)
+                                    .clicked()
                                 {
                                     choice = Some(PresetBlockAction::Edit);
                                 }

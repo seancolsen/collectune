@@ -32,9 +32,7 @@ pub(crate) fn query_actions_menu(ui: &mut egui::Ui) -> Option<QueryAction> {
     if menu_item(ui, icons::RENAME, "Rename", true, None).clicked() {
         action = Some(QueryAction::Rename);
     }
-    if menu_item(ui, icons::DELETE, "Delete", true, Some(DELETE_RED))
-    .clicked()
-    {
+    if menu_item(ui, icons::DELETE, "Delete", true, Some(DELETE_RED)).clicked() {
         action = Some(QueryAction::Delete);
     }
     action

@@ -27,9 +27,9 @@ impl App {
     // One linear pass over the bar's widgets followed by the application of
     // their collected actions; splitting it up would just scatter the flags.
     #[allow(clippy::too_many_lines)]
-    pub(crate) fn render_menu_bar(&mut self, ctx: &egui::Context) {
-        let panel_fill = ctx.style().visuals.panel_fill;
-        let inline_sections = ctx.viewport_rect().width() >= INLINE_SECTIONS_MIN_WIDTH;
+    pub(crate) fn render_menu_bar(&mut self, ui: &mut egui::Ui) {
+        let panel_fill = ui.style().visuals.panel_fill;
+        let inline_sections = ui.ctx().viewport_rect().width() >= INLINE_SECTIONS_MIN_WIDTH;
         let current_id = self.current.query_id();
         let has_page = current_id.is_some();
         let name = self
@@ -59,15 +59,15 @@ impl App {
         let mut menu_action = None;
         let rename = &mut self.rename;
 
-        egui::TopBottomPanel::top("menu_bar")
-            .exact_height(30.0)
+        egui::Panel::top("menu_bar")
+            .exact_size(30.0)
             .show_separator_line(false)
             .frame(
                 egui::Frame::new()
                     .fill(panel_fill)
                     .inner_margin(egui::Margin::same(0)),
             )
-            .show(ctx, |ui| {
+            .show_inside(ui, |ui| {
                 ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
                     ui.add_space(8.0);
                     if explorer_button(ui, organizer_open) {
@@ -102,10 +102,10 @@ impl App {
         // The narrow-screen second-row toolbar holding the section buttons,
         // shown only while the builder is open.
         if has_page && !inline_sections && builder_open {
-            egui::TopBottomPanel::top("section_bar")
-                .exact_height(30.0)
+            egui::Panel::top("section_bar")
+                .exact_size(30.0)
                 .show_separator_line(false)
-                .show(ctx, |ui| {
+                .show_inside(ui, |ui| {
                     ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
                         ui.add_space(4.0);
                         base_choice = draw_base_button(ui, &base_table, &schema);
@@ -143,7 +143,7 @@ impl App {
             page.live.definition.base = table;
         }
         if run_now {
-            self.run_query(ctx);
+            self.run_query(ui.ctx());
         }
         if save_now {
             self.save_current();
@@ -384,9 +384,7 @@ fn paint_run_save(
     let mut save = false;
     if unsaved
         && ui
-            .add(
-                egui::Button::new(icons::SAVE.rich_text().size(18.0)).frame(false),
-            )
+            .add(egui::Button::new(icons::SAVE.rich_text().size(18.0)).frame(false))
             .clicked()
     {
         save = true;

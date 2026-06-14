@@ -208,48 +208,42 @@ impl Default for App {
 }
 
 impl eframe::App for App {
-    // eframe 0.34 made `ui` the required entry point and deprecated `update`,
-    // but it still calls `update` every frame (before `ui`). We keep all the
-    // work in `update` — which renders its own panels on the context — and leave
-    // `ui` (handed a bare root `Ui`) empty.
-    fn ui(&mut self, _ui: &mut egui::Ui, _frame: &mut eframe::Frame) {}
-
-    #[expect(deprecated)]
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        self.bootstrap(ctx);
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        let ctx = ui.ctx().clone();
+        self.bootstrap(&ctx);
         self.drain_loaded_queries();
         self.drain_loaded_presets();
 
-        let panel_fill = ctx.style().visuals.panel_fill;
+        let panel_fill = ui.style().visuals.panel_fill;
         let persistent = ctx.viewport_rect().width() >= PERSISTENT_ORGANIZER_MIN_WIDTH;
 
-        self.ensure_current_results(ctx);
+        self.ensure_current_results(&ctx);
 
         // On wide screens the organizer is a persistent left panel that reserves
         // its own space, so it must be added before the top/central panels for
         // them to lay out in the remaining area.
         if persistent {
-            self.render_persistent_organizer(ctx, panel_fill);
+            self.render_persistent_organizer(ui, panel_fill);
         }
 
         // Top panels: each page type renders its own bar (including the explorer
         // button). Top/bottom panels must be added before the central panel.
         match self.current {
             CurrentPage::Query(_) => {
-                self.render_menu_bar(ctx);
+                self.render_menu_bar(ui);
                 if self.builder_section.is_some() {
-                    self.render_builder_panel(ctx);
+                    self.render_builder_panel(ui);
                 }
             }
-            CurrentPage::Welcome => self.render_welcome_bar(ctx),
+            CurrentPage::Welcome => self.render_welcome_bar(ui),
         }
-        self.render_now_playing(ctx);
+        self.render_now_playing(ui);
         self.maybe_revalidate_current_track_index();
 
         // Central panel.
         match self.current {
-            CurrentPage::Query(_) => self.render_results(ctx),
-            CurrentPage::Welcome => welcome::render_welcome_center(ctx),
+            CurrentPage::Query(_) => self.render_results(ui),
+            CurrentPage::Welcome => welcome::render_welcome_center(ui),
         }
 
         if persistent {
@@ -260,7 +254,7 @@ impl eframe::App for App {
             // On narrow screens the organizer is a modal drawer that slides over
             // the content (with a dimming scrim and swipe-to-close), pushing the
             // background layer aside as it opens.
-            let progress = self.organizer_progress(ctx);
+            let progress = self.organizer_progress(&ctx);
             let organizer_offset = progress * ORGANIZER_WIDTH;
             ctx.set_transform_layer(
                 egui::LayerId::background(),
@@ -270,14 +264,14 @@ impl eframe::App for App {
             // Render while dragging even at progress == 0 so the widget that owns
             // the in-flight drag stays mounted and `drag_stopped` fires on release.
             if progress > 0.0 || self.organizer.dragging {
-                self.render_organizer(ctx, progress, panel_fill);
+                self.render_organizer(&ctx, progress, panel_fill);
             }
         }
 
         // Modals float above everything else.
-        self.render_delete_confirm(ctx);
-        self.render_preset_save_modal(ctx);
-        self.render_manage_presets_modal(ctx);
+        self.render_delete_confirm(&ctx);
+        self.render_preset_save_modal(&ctx);
+        self.render_manage_presets_modal(&ctx);
     }
 }
 

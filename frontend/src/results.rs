@@ -87,16 +87,17 @@ impl App {
         }
     }
 
-    pub(crate) fn render_results(&mut self, ctx: &egui::Context) {
+    pub(crate) fn render_results(&mut self, ui: &mut egui::Ui) {
         let Some(current_id) = self.current.query_id() else {
             return;
         };
         let Some(results) = self.page_results(current_id) else {
-            egui::CentralPanel::default().show(ctx, |_ui| {});
+            egui::CentralPanel::default().show_inside(ui, |_ui| {});
             return;
         };
 
-        egui::CentralPanel::default().show(ctx, |ui| {
+        let ctx = ui.ctx().clone();
+        egui::CentralPanel::default().show_inside(ui, |ui| {
             let state = results.lock().unwrap();
 
             if let Some(err) = &state.error {
@@ -180,7 +181,7 @@ impl App {
                 self.handle_row_click(index, mods);
             }
             if let Some((index, id)) = double_clicked {
-                self.play_track(current_id, index, &id, ctx);
+                self.play_track(current_id, index, &id, &ctx);
             }
         });
     }

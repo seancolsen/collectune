@@ -132,22 +132,22 @@ impl App {
     /// selections — only the explorer button toggles it.
     pub(crate) fn render_persistent_organizer(
         &mut self,
-        ctx: &egui::Context,
+        ui: &mut egui::Ui,
         panel_fill: egui::Color32,
     ) {
         let items = self.visible_items();
         let current = self.current.query_id();
         let mut actions = ListActions::default();
 
-        egui::SidePanel::left("organizer_panel")
-            .exact_width(ORGANIZER_WIDTH)
+        egui::Panel::left("organizer_panel")
+            .exact_size(ORGANIZER_WIDTH)
             .resizable(false)
             .frame(egui::Frame::new().fill(panel_fill))
-            .show_animated(ctx, self.organizer.open, |ui| {
+            .show_animated_inside(ui, self.organizer.open, |ui| {
                 actions = draw_query_list(ui, &items, current, &mut self.filter, &mut self.rename);
             });
 
-        self.apply_list_actions(ctx, &actions, false);
+        self.apply_list_actions(ui.ctx(), &actions, false);
     }
 
     /// Applies the deferred outcomes of interacting with the query list, shared by
@@ -259,10 +259,7 @@ fn draw_query_list(
         ui.heading("Queries");
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.add_space(12.0);
-            if ui
-                .button(icons::ADD.rich_text().size(16.0))
-                .clicked()
-            {
+            if ui.button(icons::ADD.rich_text().size(16.0)).clicked() {
                 actions.add = true;
             }
         });
@@ -276,10 +273,7 @@ fn draw_query_list(
                 .hint_text("Filter")
                 .desired_width(ORGANIZER_WIDTH - 72.0),
         );
-        if ui
-            .button(icons::REFRESH.rich_text().size(14.0))
-            .clicked()
-        {
+        if ui.button(icons::REFRESH.rich_text().size(14.0)).clicked() {
             actions.refresh = true;
         }
     });

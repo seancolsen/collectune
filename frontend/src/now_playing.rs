@@ -27,7 +27,7 @@ enum MenuAction {
 }
 
 impl App {
-    pub(crate) fn render_now_playing(&mut self, ctx: &egui::Context) {
+    pub(crate) fn render_now_playing(&mut self, ui: &mut egui::Ui) {
         let snapshot = self.current_track.lock().unwrap().clone();
         let Some(ct) = snapshot else {
             return;
@@ -36,12 +36,13 @@ impl App {
         let playing = self.audio.is_playing();
         let position = self.audio.position();
         let duration = self.audio.duration();
+        let ctx = ui.ctx().clone();
 
         if playing {
             ctx.request_repaint_after(Duration::from_millis(50));
         } else if self.audio.has_ended() {
             if let Some((source, next_idx, id)) = self.next_track_info() {
-                self.play_track(source, next_idx, &id, ctx);
+                self.play_track(source, next_idx, &id, &ctx);
             } else {
                 *self.current_track.lock().unwrap() = None;
             }
@@ -49,7 +50,7 @@ impl App {
             return;
         }
 
-        let (toggle, action) = self.paint_now_playing_bar(ctx, &ct, playing, position, duration);
+        let (toggle, action) = self.paint_now_playing_bar(ui, &ct, playing, position, duration);
 
         if toggle {
             if playing {
@@ -62,7 +63,7 @@ impl App {
         match action {
             Some(MenuAction::Next) => {
                 if let Some((source, next_idx, id)) = self.next_track_info() {
-                    self.play_track(source, next_idx, &id, ctx);
+                    self.play_track(source, next_idx, &id, &ctx);
                 }
             }
             Some(MenuAction::Close) => {
@@ -152,13 +153,13 @@ impl App {
     /// toggle and which menu action (if any) the user picked.
     fn paint_now_playing_bar(
         &self,
-        ctx: &egui::Context,
+        ui: &mut egui::Ui,
         ct: &CurrentTrack,
         playing: bool,
         position: f64,
         duration: Option<f64>,
     ) -> (bool, Option<MenuAction>) {
-        let panel_fill = ctx.style().visuals.panel_fill;
+        let panel_fill = ui.style().visuals.panel_fill;
         let sheet_fill = {
             let [r, g, b, a] = panel_fill.to_array();
             egui::Color32::from_rgba_unmultiplied(
@@ -171,15 +172,15 @@ impl App {
 
         let mut toggle = false;
         let mut action: Option<MenuAction> = None;
-        egui::TopBottomPanel::bottom("now_playing")
-            .exact_height(40.0)
+        egui::Panel::bottom("now_playing")
+            .exact_size(40.0)
             .show_separator_line(true)
             .frame(
                 egui::Frame::new()
                     .inner_margin(egui::Margin::same(0))
                     .fill(sheet_fill),
             )
-            .show(ctx, |ui| {
+            .show_inside(ui, |ui| {
                 let full = ui.available_rect_before_wrap();
                 let pad_x = 8.0;
                 let timeline_height = 4.0;

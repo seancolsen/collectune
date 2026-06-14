@@ -6,8 +6,8 @@
 //! consistently everywhere — and re-skinning a concept is a one-line change.
 
 use eframe::egui;
-use egui_material_icons::icons as mi;
 pub(crate) use egui_material_icons::MaterialIcon;
+use egui_material_icons::icons as mi;
 
 // Query sections.
 /// The query's source table.
