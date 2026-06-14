@@ -63,6 +63,30 @@ pub fn setup_fonts(ctx: &egui::Context) {
         egui::FontFamily::Name("phosphor-fill".into()),
         vec!["phosphor-fill".into()],
     );
+
+    // Bundle our own faces so the UI doesn't depend on system-installed fonts:
+    // Noto Sans for proportional text, Noto Sans Mono for monospace. Insert each
+    // at the front of its family so it's the primary face while keeping egui's
+    // default fallbacks (emoji/CJK coverage) and the phosphor icon font behind it.
+    fonts.font_data.insert(
+        "noto-sans".into(),
+        egui::FontData::from_static(include_bytes!("../fonts/NotoSans-Regular.ttf")).into(),
+    );
+    fonts.font_data.insert(
+        "noto-sans-mono".into(),
+        egui::FontData::from_static(include_bytes!("../fonts/NotoSansMono-Regular.ttf")).into(),
+    );
+    fonts
+        .families
+        .entry(egui::FontFamily::Proportional)
+        .or_default()
+        .insert(0, "noto-sans".into());
+    fonts
+        .families
+        .entry(egui::FontFamily::Monospace)
+        .or_default()
+        .insert(0, "noto-sans-mono".into());
+
     ctx.set_fonts(fonts);
 }
 
