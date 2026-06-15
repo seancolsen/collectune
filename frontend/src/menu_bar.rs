@@ -13,7 +13,7 @@ use crate::button::{Button, SplitButton};
 use crate::icons::{self, MaterialIcon};
 use crate::now_playing::menu_item;
 use crate::page::{DELETE_RED, QueryAction, QueryPage, explorer_button, inline_rename_field};
-use crate::query_def::Section;
+use crate::query_def::{QueryDefinition, Section};
 use crate::{Rename, RenameSurface};
 
 /// An item chosen from the query page's options ("⋮") menu.
@@ -146,8 +146,16 @@ impl App {
         }
         if let Some(table) = base_choice
             && let Some(page) = self.current_page_mut()
+            && page.live.definition.base != table
         {
-            page.live.definition.base = table;
+            // Changing the base invalidates the existing filter/sort/display
+            // (presets are scoped to a base table and custom code references its
+            // columns), so reset them to defaults.
+            page.live.definition = QueryDefinition {
+                base: table,
+                ..Default::default()
+            };
+            run_now = true;
         }
         if run_now {
             self.run_query(ui.ctx());

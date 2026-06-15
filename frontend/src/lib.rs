@@ -403,7 +403,10 @@ impl App {
             created_at: now,
             modified_at: now,
             last_play: now,
-            definition: QueryDefinition::default(),
+            definition: QueryDefinition {
+                base: "track".to_string(),
+                ..Default::default()
+            },
         };
         let id = query.id;
         self.pages.push(QueryPage::ephemeral(query));
