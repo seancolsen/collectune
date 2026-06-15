@@ -4,6 +4,7 @@
 use std::rc::Rc;
 
 use eframe::egui;
+use egui::emath::GuiRounding;
 use egui::text::{LayoutJob, TextWrapping};
 
 use crate::columns::{ColumnMetadata, FontColor, FontSize, TextAlign};
@@ -262,6 +263,14 @@ fn draw_row(
     let desired = egui::vec2(ui.available_width(), layout.row_height);
     let (rect, response) = ui.allocate_exact_size(desired, egui::Sense::click());
 
+    // Snap the row to the physical pixel grid before painting. Allocated rows sit at
+    // fractional pixel positions, so without this the background fills (and the
+    // separator) land on different subpixel offsets row-to-row, making the separators
+    // render with inconsistent darkness/thickness. Consecutive rows share an exact edge,
+    // so snapping keeps them gap-free.
+    let ppp = ui.ctx().pixels_per_point();
+    let rect = rect.round_to_pixels(ppp);
+
     let visuals = ui.visuals();
     let base_bg = if selected {
         let base = visuals.selection.bg_fill;
@@ -293,12 +302,23 @@ fn draw_row(
         ui.painter().rect_filled(accent_rect, 0.0, ACCENT_BLUE);
     }
 
-    // thin separator line at the bottom of the row
-    let sep_color = visuals.widgets.noninteractive.bg_stroke.color;
-    ui.painter().line_segment(
-        [rect.left_bottom(), rect.right_bottom()],
-        egui::Stroke::new(1.0, sep_color),
+    // Thin separator along the bottom of the row. Drawn as a pixel-aligned filled
+    // rectangle (not a 1px line): the rect's edges land on physical pixel boundaries so
+    // it renders crisply and identically on every row, and because it sits just *inside*
+    // the row's bottom edge the next row's background fill cannot paint over it.
+    // Soften the separator a touch by letting the row background show through.
+    let sep_color = visuals
+        .widgets
+        .noninteractive
+        .bg_stroke
+        .color
+        .gamma_multiply(0.5);
+    let sep_h = 1.0_f32.round_to_pixels(ppp);
+    let sep_rect = egui::Rect::from_min_max(
+        egui::pos2(rect.left(), rect.bottom() - sep_h),
+        rect.right_bottom(),
     );
+    ui.painter().rect_filled(sep_rect, 0.0, sep_color);
 
     for (vis_idx, (col_idx, meta)) in layout.visible.iter().enumerate() {
         let placement = layout.placements[vis_idx];
