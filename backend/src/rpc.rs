@@ -37,6 +37,7 @@ struct Preset {
     base_table: String,
     section: String,
     definition: String,
+    is_default: bool,
     created_at: i64,
     modified_at: i64,
 }
@@ -101,6 +102,9 @@ pub(crate) async fn rpc(
     }
 }
 
+// A flat match over every RPC method; splitting it up would just scatter the
+// per-method param structs and handlers.
+#[allow(clippy::too_many_lines)]
 fn dispatch(state: &AppState, method: &str, params: Value) -> Result<Value, String> {
     match method {
         "query.list" => state.read(|conn| -> Result<Value, String> {
@@ -179,11 +183,19 @@ fn dispatch(state: &AppState, method: &str, params: Value) -> Result<Value, Stri
                 id: String,
                 name: String,
                 definition: String,
+                is_default: bool,
                 modified_at: i64,
             }
             let p: P = from_params(params)?;
             state.write(|conn| {
-                update_preset(conn, &p.id, &p.name, &p.definition, p.modified_at)?;
+                update_preset(
+                    conn,
+                    &p.id,
+                    &p.name,
+                    &p.definition,
+                    p.is_default,
+                    p.modified_at,
+                )?;
                 Ok(Value::Null)
             })
         }
@@ -277,7 +289,7 @@ fn rename_query(conn: &Connection, id: &str, name: &str) -> Result<(), String> {
 fn list_presets(conn: &Connection) -> Result<Vec<Preset>, String> {
     let mut stmt = conn
         .prepare(
-            "SELECT id::text, name, base_table, section, definition, \
+            "SELECT id::text, name, base_table, section, definition, is_default, \
              epoch(created_at)::bigint, epoch(modified_at)::bigint \
              FROM preset ORDER BY name",
         )
@@ -290,8 +302,9 @@ fn list_presets(conn: &Connection) -> Result<Vec<Preset>, String> {
                 base_table: row.get(2)?,
                 section: row.get(3)?,
                 definition: row.get(4)?,
-                created_at: row.get(5)?,
-                modified_at: row.get(6)?,
+                is_default: row.get(5)?,
+                created_at: row.get(6)?,
+                modified_at: row.get(7)?,
             })
         })
         .map_err(|e| e.to_string())?;
@@ -300,8 +313,8 @@ fn list_presets(conn: &Connection) -> Result<Vec<Preset>, String> {
 
 fn add_preset(conn: &Connection, preset: &Preset) -> Result<(), String> {
     conn.execute(
-        "INSERT INTO preset (id, name, base_table, section, definition, created_at, modified_at) \
-         VALUES (TRY_CAST(? AS UUID), ?, ?, ?, ?, make_timestamp(? * 1000000)::timestamp_s, \
+        "INSERT INTO preset (id, name, base_table, section, definition, is_default, created_at, modified_at) \
+         VALUES (TRY_CAST(? AS UUID), ?, ?, ?, ?, ?, make_timestamp(? * 1000000)::timestamp_s, \
          make_timestamp(? * 1000000)::timestamp_s)",
         duckdb::params![
             preset.id,
@@ -309,6 +322,7 @@ fn add_preset(conn: &Connection, preset: &Preset) -> Result<(), String> {
             preset.base_table,
             preset.section,
             preset.definition,
+            preset.is_default,
             preset.created_at,
             preset.modified_at,
         ],
@@ -322,13 +336,14 @@ fn update_preset(
     id: &str,
     name: &str,
     definition: &str,
+    is_default: bool,
     modified_at: i64,
 ) -> Result<(), String> {
     conn.execute(
-        "UPDATE preset SET name = ?, definition = ?, \
+        "UPDATE preset SET name = ?, definition = ?, is_default = ?, \
          modified_at = make_timestamp(? * 1000000)::timestamp_s \
          WHERE id = TRY_CAST(? AS UUID)",
-        duckdb::params![name, definition, modified_at, id],
+        duckdb::params![name, definition, is_default, modified_at, id],
     )
     .map_err(|e| e.to_string())?;
     Ok(())

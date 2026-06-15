@@ -34,7 +34,7 @@ use field_layout::FieldLayout;
 use now_playing::CurrentTrack;
 use organizer::Organizer;
 use page::{CurrentPage, QueryPage};
-use query_def::{QueryDefinition, Section};
+use query_def::{QueryDefinition, Section, SectionContent};
 
 pub(crate) const ORGANIZER_WIDTH: f32 = 200.0;
 const ORGANIZER_ANIM_TIME: f32 = 0.1;
@@ -403,14 +403,38 @@ impl App {
             created_at: now,
             modified_at: now,
             last_play: now,
-            definition: QueryDefinition {
-                base: "track".to_string(),
-                ..Default::default()
-            },
+            definition: self.definition_for_base("track".to_string()),
         };
         let id = query.id;
         self.pages.push(QueryPage::ephemeral(query));
         self.select_page(id);
+    }
+
+    /// A fresh definition for `base`, seeded with every default preset scoped to
+    /// that base table. The filter section accepts any number of default presets;
+    /// sort and display take only one, so the first default of each (presets are
+    /// listed by name) wins.
+    pub(crate) fn definition_for_base(&self, base: String) -> QueryDefinition {
+        let mut def = QueryDefinition {
+            base,
+            ..Default::default()
+        };
+        for preset in &self.presets {
+            if !preset.is_default || preset.base_table != def.base {
+                continue;
+            }
+            match preset.section {
+                Section::Filter => def.filter.presets.push(preset.id),
+                Section::Sort if def.sort == SectionContent::default() => {
+                    def.sort = SectionContent::Preset(preset.id);
+                }
+                Section::Display if def.display == SectionContent::default() => {
+                    def.display = SectionContent::Preset(preset.id);
+                }
+                Section::Sort | Section::Display => {}
+            }
+        }
+        def
     }
 
     pub(crate) fn select_page(&mut self, id: Uuid) {

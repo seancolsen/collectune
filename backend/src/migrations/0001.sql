@@ -91,6 +91,7 @@ create table preset (
   base_table text not null,
   section text not null, -- 'filter' | 'sort' | 'display'
   definition text not null, -- Raw Querydown fragment for the section
+  is_default boolean not null default false, -- Indicates that the preset will be applied automatically when a query's base is set to base_table
   created_at timestamp_s not null,
   modified_at timestamp_s not null
 );

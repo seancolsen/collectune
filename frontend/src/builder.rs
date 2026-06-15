@@ -42,6 +42,7 @@ pub(crate) struct PresetEdit {
     pub(crate) id: Uuid,
     pub(crate) name: String,
     pub(crate) definition: String,
+    pub(crate) is_default: bool,
 }
 
 /// Scope of the manage-presets modal: every preset for the current base
@@ -404,6 +405,7 @@ impl App {
                             .desired_rows(4)
                             .font(egui::TextStyle::Monospace),
                     );
+                    ui.checkbox(&mut edit.is_default, "Apply by default");
                 }
                 if save {
                     self.commit_preset_edit();
@@ -437,11 +439,16 @@ impl App {
                 });
                 let preset = self.presets.iter().find(|p| p.id == id);
                 let name = preset.map_or("(missing preset)", |p| p.name.as_str());
+                let is_default = preset.is_some_and(|p| p.is_default);
                 egui::CollapsingHeader::new(name)
                     .id_salt(("preset_block", id))
                     .show(ui, |ui| {
                         let definition = preset.map_or("", |p| p.definition.as_str());
                         ui.label(egui::RichText::new(definition).monospace());
+                        if is_default {
+                            ui.add_space(2.0);
+                            ui.weak("Applied by default");
+                        }
                     });
             }
         });
@@ -465,6 +472,7 @@ impl App {
                 id,
                 name: preset.name.clone(),
                 definition: preset.definition.clone(),
+                is_default: preset.is_default,
             });
         }
     }
@@ -481,11 +489,13 @@ impl App {
         if let Some(preset) = self.presets.iter_mut().find(|p| p.id == edit.id) {
             preset.name = name;
             preset.definition = edit.definition;
+            preset.is_default = edit.is_default;
             preset.modified_at = rpc::now_epoch();
             rpc::update_preset(
                 preset.id,
                 &preset.name,
                 &preset.definition,
+                preset.is_default,
                 preset.modified_at,
             );
         }
@@ -579,6 +589,7 @@ impl App {
             base_table,
             section: state.section,
             definition: state.definition,
+            is_default: false,
             created_at: now,
             modified_at: now,
         };
@@ -606,7 +617,7 @@ impl App {
         let base_table = self
             .current_page()
             .map_or(String::new(), |p| p.live.definition.base.clone());
-        let listed: Vec<(Uuid, String, Section)> = self
+        let listed: Vec<(Uuid, String, Section, bool)> = self
             .presets
             .iter()
             .filter(|p| p.base_table == base_table)
@@ -614,7 +625,7 @@ impl App {
                 ManageScope::All => true,
                 ManageScope::Section(section) => p.section == section,
             })
-            .map(|p| (p.id, p.name.clone(), p.section))
+            .map(|p| (p.id, p.name.clone(), p.section, p.is_default))
             .collect();
 
         let mut delete = None;
@@ -632,11 +643,14 @@ impl App {
             if listed.is_empty() {
                 ui.weak("No presets yet.");
             }
-            for (id, name, section) in &listed {
+            for (id, name, section, is_default) in &listed {
                 ui.horizontal(|ui| {
                     ui.label(name);
                     if scope == ManageScope::All {
                         ui.weak(section.noun().to_lowercase());
+                    }
+                    if *is_default {
+                        ui.weak("· default");
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if Button::icon(icons::DELETE)

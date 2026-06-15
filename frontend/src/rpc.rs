@@ -36,6 +36,9 @@ pub(crate) struct Preset {
     pub(crate) base_table: String,
     pub(crate) section: Section,
     pub(crate) definition: String,
+    /// Whether this preset is applied automatically when a query's base table
+    /// is set to [`Preset::base_table`] (on query creation or base change).
+    pub(crate) is_default: bool,
     pub(crate) created_at: i64,
     pub(crate) modified_at: i64,
 }
@@ -94,12 +97,19 @@ pub(crate) fn add_preset(preset: &Preset) {
     dispatch_call("preset.add", params, |_| {});
 }
 
-/// Persists an edited preset name/definition. Fire-and-forget.
-pub(crate) fn update_preset(id: Uuid, name: &str, definition: &str, modified_at: i64) {
+/// Persists an edited preset name/definition/default flag. Fire-and-forget.
+pub(crate) fn update_preset(
+    id: Uuid,
+    name: &str,
+    definition: &str,
+    is_default: bool,
+    modified_at: i64,
+) {
     let params = json!({
         "id": id,
         "name": name,
         "definition": definition,
+        "is_default": is_default,
         "modified_at": modified_at,
     });
     dispatch_call("preset.update", params, |_| {});
