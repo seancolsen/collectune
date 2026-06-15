@@ -16,6 +16,11 @@ use crate::page::{DELETE_RED, QueryAction, QueryPage, explorer_button, inline_re
 use crate::query_def::Section;
 use crate::{Rename, RenameSurface};
 
+/// At or below this query-page width, the menu bar switches to its compact
+/// layout: the Filter/Sort/Display buttons drop their text labels and the
+/// run/filter separator is hidden.
+const COMPACT_MENU_BAR_WIDTH: f32 = 500.0;
+
 /// An item chosen from the query page's options ("⋮") menu.
 enum PageMenu {
     Action(QueryAction),
@@ -28,6 +33,9 @@ impl App {
     #[allow(clippy::too_many_lines)]
     pub(crate) fn render_menu_bar(&mut self, ui: &mut egui::Ui) {
         let panel_fill = ui.style().visuals.panel_fill;
+        // On a narrow query page, drop the section buttons' text labels (and the
+        // run/filter separator) to keep the bar's controls from crowding.
+        let compact = ui.available_width() <= COMPACT_MENU_BAR_WIDTH;
         let current_id = self.current.query_id();
         let has_page = current_id.is_some();
         let name = self
@@ -75,12 +83,18 @@ impl App {
                         toggle_organizer = true;
                     }
                     if has_page {
-                        // A small gap separating the name from the explorer toggle.
-                        ui.add_space(2.0);
+                        // Keep the name tucked close to the explorer toggle for
+                        // density: zero the spacing egui would insert before the
+                        // controls layout, leaving just this small explicit gap.
+                        let item_spacing_x = ui.spacing().item_spacing.x;
+                        ui.spacing_mut().item_spacing.x = 0.0;
+                        ui.add_space(3.0);
                         // Lay out the right-hand controls first so they claim their
                         // space; whatever's left in the middle then goes to the
                         // (truncating) query name and the conditional save button.
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            // Restore normal inter-widget spacing inside the controls.
+                            ui.spacing_mut().item_spacing.x = item_spacing_x;
                             ui.add_space(8.0);
                             match draw_page_menu_button(ui, &base_table, show_revert, &schema) {
                                 Some(PageMenu::Base(table)) => base_choice = Some(table),
@@ -89,10 +103,12 @@ impl App {
                                 Some(PageMenu::Action(QueryAction::Delete)) => want_delete = true,
                                 None => {}
                             }
-                            let sections = draw_section_buttons(ui, builder_section);
+                            let sections = draw_section_buttons(ui, builder_section, compact);
                             section_clicked = sections.clicked;
                             section_menu_anchor = sections.menu;
-                            ui.separator();
+                            if !compact {
+                                ui.separator();
+                            }
                             if Button::icon(icons::RUN)
                                 .enabled(!running)
                                 .spin(running)
@@ -321,8 +337,10 @@ struct SectionButtons {
 
 /// Draws the Filter/Sort/Display toggle buttons in the `ui`'s layout direction.
 /// Each is a [`SplitButton`]: its main area toggles the builder section, and
-/// while active it shows a menu trigger for that section's options.
-fn draw_section_buttons(ui: &mut egui::Ui, open: Option<Section>) -> SectionButtons {
+/// while active it shows a menu trigger for that section's options. When
+/// `compact`, the buttons drop their text labels (keeping their icons and, while
+/// active, their menu triggers) to save room on a narrow bar.
+fn draw_section_buttons(ui: &mut egui::Ui, open: Option<Section>, compact: bool) -> SectionButtons {
     let mut out = SectionButtons {
         clicked: None,
         menu: None,
@@ -334,6 +352,7 @@ fn draw_section_buttons(ui: &mut egui::Ui, open: Option<Section>) -> SectionButt
     for section in sections {
         let resp = SplitButton::new(section_icon(section), section.label())
             .active(open == Some(section))
+            .show_label(!compact)
             .show(ui);
         if resp.main.clicked() {
             out.clicked = Some(section);

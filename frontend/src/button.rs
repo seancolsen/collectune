@@ -139,6 +139,7 @@ pub(crate) struct SplitButton {
     icon: MaterialIcon,
     label: String,
     active: bool,
+    show_label: bool,
 }
 
 /// The two independent responses produced by showing a [`SplitButton`].
@@ -156,6 +157,7 @@ impl SplitButton {
             icon,
             label: label.into(),
             active: false,
+            show_label: true,
         }
     }
 
@@ -163,6 +165,13 @@ impl SplitButton {
     /// trigger.
     pub(crate) fn active(mut self, active: bool) -> Self {
         self.active = active;
+        self
+    }
+
+    /// When `false`, the button shows only its icon (and, while active, its menu
+    /// trigger), dropping the text label to save horizontal space on narrow bars.
+    pub(crate) fn show_label(mut self, show_label: bool) -> Self {
+        self.show_label = show_label;
         self
     }
 
@@ -181,15 +190,17 @@ impl SplitButton {
                 ..Default::default()
             },
         );
-        job.append(
-            &self.label,
-            ICON_GAP,
-            egui::TextFormat {
-                font_id: egui::FontId::proportional(LABEL_SIZE),
-                color: text_color,
-                ..Default::default()
-            },
-        );
+        if self.show_label {
+            job.append(
+                &self.label,
+                ICON_GAP,
+                egui::TextFormat {
+                    font_id: egui::FontId::proportional(LABEL_SIZE),
+                    color: text_color,
+                    ..Default::default()
+                },
+            );
+        }
         let galley = ui.painter().layout_job(job);
 
         let main_w = galley.size().x + PAD_X * 2.0;
