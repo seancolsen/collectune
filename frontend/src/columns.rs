@@ -1,11 +1,11 @@
 //! Per-column display metadata.
 //!
 //! Querydown lets the user attach arbitrary metadata to each result column in their
-//! query source. The compiler surfaces this as one [`MetaValue`] (or `None`) per output
+//! query source. The compiler surfaces this as one [`AnnotationValue`] (or `None`) per output
 //! column. Here we normalize each blob into a [`ColumnMetadata`] with every field
 //! resolved to a concrete value, so rendering never has to think about defaults.
 
-use querydown::MetaValue;
+use querydown::AnnotationValue;
 use serde::Deserialize;
 
 use crate::format::Formatter;
@@ -140,7 +140,7 @@ fn resolve_text_align(value: Option<&str>) -> TextAlign {
 impl ColumnMetadata {
     /// Normalizes one column's metadata blob (or its absence) into resolved settings. A
     /// `None` blob, or any blob that isn't a JSON object, yields all defaults.
-    pub(crate) fn from_meta(meta: Option<&MetaValue>) -> Self {
+    pub(crate) fn from_meta(meta: Option<&AnnotationValue>) -> Self {
         let raw = meta
             .and_then(|m| serde_json::to_value(m).ok())
             .and_then(|v| serde_json::from_value::<RawColumnMetadata>(v).ok())
@@ -173,15 +173,15 @@ mod tests {
 
     #[test]
     fn non_object_yields_defaults() {
-        let meta = MetaValue::String("nonsense".to_string());
+        let meta = AnnotationValue::String("nonsense".to_string());
         assert_eq!(
             ColumnMetadata::from_meta(Some(&meta)),
             ColumnMetadata::default()
         );
     }
 
-    fn object(entries: Vec<(&str, MetaValue)>) -> MetaValue {
-        MetaValue::Object(
+    fn object(entries: Vec<(&str, AnnotationValue)>) -> AnnotationValue {
+        AnnotationValue::Object(
             entries
                 .into_iter()
                 .map(|(k, v)| (k.to_string(), v))
@@ -189,19 +189,19 @@ mod tests {
         )
     }
 
-    fn num(n: &str) -> MetaValue {
-        MetaValue::Number(n.to_string())
+    fn num(n: &str) -> AnnotationValue {
+        AnnotationValue::Number(n.to_string())
     }
 
     #[test]
     fn parses_all_fields() {
         let meta = object(vec![
-            ("hide", MetaValue::String("yes".to_string())),
-            ("color", MetaValue::String("light".to_string())),
-            ("size", MetaValue::String("small".to_string())),
-            ("align", MetaValue::String("center".to_string())),
-            ("prefix", MetaValue::String("$".to_string())),
-            ("suffix", MetaValue::String(" kg".to_string())),
+            ("hide", AnnotationValue::String("yes".to_string())),
+            ("color", AnnotationValue::String("light".to_string())),
+            ("size", AnnotationValue::String("small".to_string())),
+            ("align", AnnotationValue::String("center".to_string())),
+            ("prefix", AnnotationValue::String("$".to_string())),
+            ("suffix", AnnotationValue::String(" kg".to_string())),
         ]);
         let m = ColumnMetadata::from_meta(Some(&meta));
         assert!(m.hide);
@@ -214,15 +214,15 @@ mod tests {
 
     #[test]
     fn hide_only_yes_hides() {
-        let meta = object(vec![("hide", MetaValue::String("no".to_string()))]);
+        let meta = object(vec![("hide", AnnotationValue::String("no".to_string()))]);
         assert!(!ColumnMetadata::from_meta(Some(&meta)).hide);
     }
 
     #[test]
     fn unknown_enum_values_fall_back_to_defaults() {
         let meta = object(vec![
-            ("color", MetaValue::String("rainbow".to_string())),
-            ("align", MetaValue::String("justify".to_string())),
+            ("color", AnnotationValue::String("rainbow".to_string())),
+            ("align", AnnotationValue::String("justify".to_string())),
         ]);
         let m = ColumnMetadata::from_meta(Some(&meta));
         assert_eq!(m.font_color, FontColor::Default);
@@ -238,7 +238,7 @@ mod tests {
 
     #[test]
     fn width_single_element_list_keeps_default_max() {
-        let meta = object(vec![("width", MetaValue::Array(vec![num("80")]))]);
+        let meta = object(vec![("width", AnnotationValue::Array(vec![num("80")]))]);
         let m = ColumnMetadata::from_meta(Some(&meta));
         assert_eq!((m.min_width, m.max_width), (80.0, DEFAULT_MAX_WIDTH));
     }
@@ -247,7 +247,7 @@ mod tests {
     fn width_two_element_list_sets_both() {
         let meta = object(vec![(
             "width",
-            MetaValue::Array(vec![num("50"), num("300")]),
+            AnnotationValue::Array(vec![num("50"), num("300")]),
         )]);
         let m = ColumnMetadata::from_meta(Some(&meta));
         assert_eq!((m.min_width, m.max_width), (50.0, 300.0));
@@ -257,7 +257,7 @@ mod tests {
     fn width_swaps_when_min_exceeds_max() {
         let meta = object(vec![(
             "width",
-            MetaValue::Array(vec![num("300"), num("50")]),
+            AnnotationValue::Array(vec![num("300"), num("50")]),
         )]);
         let m = ColumnMetadata::from_meta(Some(&meta));
         assert_eq!((m.min_width, m.max_width), (50.0, 300.0));
@@ -267,7 +267,7 @@ mod tests {
     fn parses_formatter_blob() {
         let meta = object(vec![(
             "formatter",
-            object(vec![("type", MetaValue::String("duration".to_string()))]),
+            object(vec![("type", AnnotationValue::String("duration".to_string()))]),
         )]);
         let m = ColumnMetadata::from_meta(Some(&meta));
         assert_eq!(m.formatter, Some(Formatter::Duration {}));
@@ -276,10 +276,10 @@ mod tests {
     #[test]
     fn unknown_formatter_type_is_ignored_without_disturbing_other_fields() {
         let meta = object(vec![
-            ("align", MetaValue::String("right".to_string())),
+            ("align", AnnotationValue::String("right".to_string())),
             (
                 "formatter",
-                object(vec![("type", MetaValue::String("bogus".to_string()))]),
+                object(vec![("type", AnnotationValue::String("bogus".to_string()))]),
             ),
         ]);
         let m = ColumnMetadata::from_meta(Some(&meta));
@@ -289,7 +289,7 @@ mod tests {
 
     #[test]
     fn width_empty_list_uses_defaults() {
-        let meta = object(vec![("width", MetaValue::Array(vec![]))]);
+        let meta = object(vec![("width", AnnotationValue::Array(vec![]))]);
         let m = ColumnMetadata::from_meta(Some(&meta));
         assert_eq!(
             (m.min_width, m.max_width),

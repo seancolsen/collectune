@@ -25,7 +25,7 @@ pub(crate) fn querydown_to_duckdb(input: &str, schema_json: &str) -> Result<Comp
     let compiler = Compiler::new(schema_json, options)?;
     let result = compiler.compile(input.to_string())?;
     let columns = result
-        .column_metadata
+        .column_annotations
         .iter()
         .map(|meta| ColumnMetadata::from_meta(meta.as_ref()))
         .collect();
