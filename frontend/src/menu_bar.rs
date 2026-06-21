@@ -82,6 +82,7 @@ impl App {
         let mut rename_cancel = false;
         let mut want_rename = false;
         let mut want_revert = false;
+        let mut want_duplicate = false;
         let mut want_delete = false;
         let rename = &mut self.rename;
 
@@ -124,6 +125,9 @@ impl App {
                                 Some(PageMenu::ConvertToFull) => convert_to_full = true,
                                 Some(PageMenu::Action(QueryAction::Rename)) => want_rename = true,
                                 Some(PageMenu::Action(QueryAction::Revert)) => want_revert = true,
+                                Some(PageMenu::Action(QueryAction::Duplicate)) => {
+                                    want_duplicate = true;
+                                }
                                 Some(PageMenu::Action(QueryAction::Delete)) => want_delete = true,
                                 None => {}
                             }
@@ -232,6 +236,9 @@ impl App {
             if want_revert {
                 self.revert_query(id);
             }
+            if want_duplicate {
+                self.duplicate_query(id);
+            }
             if want_delete {
                 self.request_delete(id);
             }
@@ -323,6 +330,9 @@ fn draw_page_menu_button(
             }
             if show_revert && menu_item(ui, icons::REVERT, "Revert changes", true, None).clicked() {
                 chosen = Some(PageMenu::Action(QueryAction::Revert));
+            }
+            if menu_item(ui, icons::DUPLICATE, "Duplicate", true, None).clicked() {
+                chosen = Some(PageMenu::Action(QueryAction::Duplicate));
             }
             if menu_item(ui, icons::DELETE, "Delete", true, Some(DELETE_RED)).clicked() {
                 chosen = Some(PageMenu::Action(QueryAction::Delete));

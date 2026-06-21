@@ -78,6 +78,8 @@ pub(crate) enum QueryAction {
     /// Discard unsaved edits, restoring the last-saved version. Only offered for
     /// a query that has already been saved.
     Revert,
+    /// Create a new query copied from this one (carrying any unsaved edits).
+    Duplicate,
     Delete,
 }
 
@@ -93,6 +95,9 @@ pub(crate) fn query_actions_menu(ui: &mut egui::Ui, show_revert: bool) -> Option
     }
     if show_revert && menu_item(ui, icons::REVERT, "Revert changes", true, None).clicked() {
         action = Some(QueryAction::Revert);
+    }
+    if menu_item(ui, icons::DUPLICATE, "Duplicate", true, None).clicked() {
+        action = Some(QueryAction::Duplicate);
     }
     if menu_item(ui, icons::DELETE, "Delete", true, Some(DELETE_RED)).clicked() {
         action = Some(QueryAction::Delete);

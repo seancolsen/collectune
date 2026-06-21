@@ -426,6 +426,28 @@ impl App {
         self.select_page(id);
     }
 
+    /// Creates a new ephemeral query copied from `id` and selects it. The copy's
+    /// definition is taken from the source's `live` version, so any unsaved edits
+    /// are carried into the duplicate; its name is computed like a freshly created
+    /// query's (see [`rpc::now_name`]).
+    pub(crate) fn duplicate_query(&mut self, id: Uuid) {
+        let Some(source) = self.pages.iter().find(|p| p.live.id == id) else {
+            return;
+        };
+        let now = rpc::now_epoch();
+        let query = rpc::Query {
+            id: Uuid::new_v4(),
+            name: rpc::now_name(),
+            created_at: now,
+            modified_at: now,
+            last_play: now,
+            definition: source.live.definition.clone(),
+        };
+        let new_id = query.id;
+        self.pages.push(QueryPage::ephemeral(query));
+        self.select_page(new_id);
+    }
+
     /// A fresh definition for `base`, seeded with every default preset scoped to
     /// that base table. The filter section accepts any number of default presets;
     /// sort and display take only one, so the first default of each (presets are

@@ -46,6 +46,7 @@ struct ListActions {
     clicked: Option<Uuid>,
     rename_request: Option<Uuid>,
     revert_request: Option<Uuid>,
+    duplicate_request: Option<Uuid>,
     delete_request: Option<Uuid>,
     rename_commit: bool,
     rename_cancel: bool,
@@ -187,6 +188,9 @@ impl App {
         if let Some(id) = actions.revert_request {
             self.revert_query(id);
         }
+        if let Some(id) = actions.duplicate_request {
+            self.duplicate_query(id);
+        }
         if let Some(id) = actions.delete_request {
             self.request_delete(id);
         }
@@ -315,6 +319,7 @@ fn draw_query_list(
                 match out.action {
                     Some(QueryAction::Rename) => actions.rename_request = Some(item.id),
                     Some(QueryAction::Revert) => actions.revert_request = Some(item.id),
+                    Some(QueryAction::Duplicate) => actions.duplicate_request = Some(item.id),
                     Some(QueryAction::Delete) => actions.delete_request = Some(item.id),
                     None => {}
                 }

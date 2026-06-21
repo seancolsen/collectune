@@ -32,6 +32,8 @@ pub(crate) const UNSAVED: MaterialIcon = mi::ICON_EMERGENCY;
 pub(crate) const ADD: MaterialIcon = mi::ICON_ADD;
 pub(crate) const RENAME: MaterialIcon = mi::ICON_EDIT;
 pub(crate) const EDIT: MaterialIcon = mi::ICON_EDIT;
+/// Duplicate a query into a new copy.
+pub(crate) const DUPLICATE: MaterialIcon = mi::ICON_CONTENT_COPY;
 pub(crate) const DELETE: MaterialIcon = mi::ICON_DELETE;
 /// Remove an item, or close the now-playing bar.
 pub(crate) const CLOSE: MaterialIcon = mi::ICON_CLOSE;
