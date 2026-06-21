@@ -40,20 +40,87 @@ impl Section {
     }
 }
 
-/// A sort or display section: either hand-written Querydown or a reference to
-/// a saved preset. (The filter section instead uses [`FilterParts`], which can
-/// combine custom code with several presets.)
+/// A sort or display section: hand-written Querydown, a reference to a saved
+/// preset, or a built-in (parameterized) preset. (The filter section instead
+/// uses [`FilterParts`], which can combine custom code with several presets.)
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub(crate) enum SectionContent {
     Custom(String),
     Preset(Uuid),
+    Builtin(BuiltinPreset),
 }
 
 impl Default for SectionContent {
     fn default() -> Self {
         SectionContent::Custom(String::new())
     }
+}
+
+/// A built-in sorting preset: one the app knows by name and parameterizes per
+/// query. Unlike a user-defined [`Preset`] (a stored fragment referenced by
+/// id), a built-in preset carries its parameters inline in the stored query —
+/// so the query records "the Shuffle preset, with *this* seed". There is no
+/// user-defined parameterized-preset concept yet; this is purpose-built.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "preset", rename_all = "lowercase")]
+pub(crate) enum BuiltinPreset {
+    /// Random but stable ordering: orders by a hash of each row's id salted
+    /// with `seed`, so the order holds across refreshes but a fresh seed
+    /// reshuffles it.
+    Shuffle { seed: String },
+}
+
+impl BuiltinPreset {
+    /// A Shuffle preset with a freshly generated seed.
+    pub(crate) fn shuffle() -> Self {
+        BuiltinPreset::Shuffle {
+            seed: generate_seed(),
+        }
+    }
+
+    /// The display name shown in menus and the builder block.
+    pub(crate) fn name(&self) -> &'static str {
+        match self {
+            BuiltinPreset::Shuffle { .. } => "Shuffle",
+        }
+    }
+
+    /// Regenerates the preset's parameters — for Shuffle, a new seed, which
+    /// reshuffles the ordering.
+    pub(crate) fn reshuffle(&mut self) {
+        match self {
+            BuiltinPreset::Shuffle { seed } => *seed = generate_seed(),
+        }
+    }
+
+    /// The Querydown fragment this built-in preset resolves to. Shown in the
+    /// builder's expandable Shuffle block so the user can see the generated code.
+    pub(crate) fn querydown(&self) -> String {
+        match self {
+            BuiltinPreset::Shuffle { seed } => format!("\\\\id|concat('{seed}')|md5"),
+        }
+    }
+}
+
+/// Number of characters in a generated shuffle seed.
+const SEED_LEN: usize = 20;
+/// Alphabet a shuffle seed is drawn from (matching the example in the design).
+const SEED_ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+
+/// Generates a random [`SEED_LEN`]-character alphanumeric seed. Randomness comes
+/// from v4 UUIDs (already a dependency, and backed by the platform RNG on both
+/// native and wasm), avoiding a dedicated RNG crate. The slight modulo bias is
+/// irrelevant for a shuffle seed.
+fn generate_seed() -> String {
+    let mut bytes: Vec<u8> = Vec::with_capacity(SEED_LEN);
+    while bytes.len() < SEED_LEN {
+        bytes.extend_from_slice(Uuid::new_v4().as_bytes());
+    }
+    bytes[..SEED_LEN]
+        .iter()
+        .map(|b| SEED_ALPHABET[*b as usize % SEED_ALPHABET.len()] as char)
+        .collect()
 }
 
 /// The filter section: custom conditions combined (via AND) with any number
@@ -247,10 +314,11 @@ pub(crate) struct QuerySections {
 /// preset reference against `presets`.
 fn resolve_section(content: &SectionContent, presets: &[Preset]) -> Result<String, String> {
     let text = match content {
-        SectionContent::Custom(text) => text.as_str(),
-        SectionContent::Preset(id) => preset_definition(presets, *id)?,
+        SectionContent::Custom(text) => text.trim().to_string(),
+        SectionContent::Preset(id) => preset_definition(presets, *id)?.trim().to_string(),
+        SectionContent::Builtin(builtin) => builtin.querydown(),
     };
-    Ok(text.trim().to_string())
+    Ok(text)
 }
 
 fn preset_definition(presets: &[Preset], id: Uuid) -> Result<&str, String> {

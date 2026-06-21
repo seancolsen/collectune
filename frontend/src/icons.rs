@@ -51,6 +51,8 @@ pub(crate) const BUILDER: MaterialIcon = mi::ICON_BUILD;
 // Presets.
 /// A saved preset, shown beside preset entries.
 pub(crate) const PRESET: MaterialIcon = mi::ICON_APPROVAL;
+/// The built-in "Shuffle" sorting preset, and its "Reshuffle" action.
+pub(crate) const SHUFFLE: MaterialIcon = mi::ICON_SHUFFLE;
 /// Manage the whole preset library ("toolbox").
 pub(crate) const MANAGE_PRESETS: MaterialIcon = mi::ICON_HANDYMAN;
 /// Convert/merge a preset into custom text.

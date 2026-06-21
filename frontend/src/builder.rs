@@ -11,7 +11,7 @@ use crate::button::Button;
 use crate::icons;
 use crate::now_playing::menu_item;
 use crate::page::DELETE_RED;
-use crate::query_def::{FilterParts, QueryDefinition, Section, SectionContent};
+use crate::query_def::{BuiltinPreset, FilterParts, QueryDefinition, Section, SectionContent};
 use crate::rpc::{self, Preset};
 
 /// Background of a custom (hand-written) block.
@@ -193,7 +193,11 @@ impl App {
         }
 
         match block_action {
-            Some((id, PresetBlockAction::Remove)) => def.filter.presets.retain(|p| *p != id),
+            // Removing a preset changes the results, so refresh.
+            Some((id, PresetBlockAction::Remove)) => {
+                def.filter.presets.retain(|p| *p != id);
+                *run = true;
+            }
             Some((id, PresetBlockAction::Edit)) => self.begin_preset_edit(id),
             Some((id, PresetBlockAction::MergeIntoCustom)) => {
                 if let Some(preset) = self.presets.iter().find(|p| p.id == id) {
@@ -226,8 +230,16 @@ impl App {
             choice
         });
         match filter_choice {
-            Some(OptionsChoice::Reset) => def.filter = FilterParts::default(),
-            Some(OptionsChoice::UsePreset(id)) => def.filter.presets.push(id),
+            // Resetting clears any applied presets, so refresh.
+            Some(OptionsChoice::Reset) => {
+                def.filter = FilterParts::default();
+                *run = true;
+            }
+            // Adding a preset changes the results, so refresh.
+            Some(OptionsChoice::UsePreset(id)) => {
+                def.filter.presets.push(id);
+                *run = true;
+            }
             Some(OptionsChoice::Manage) => self.manage_presets = Some(ManageScope::All),
             _ => {}
         }
@@ -257,6 +269,8 @@ impl App {
     ) {
         let base_chosen = def.is_runnable();
         let available = self.presets_for(&def.base, section);
+        // The built-in Shuffle preset is offered only for sorting the track table.
+        let show_shuffle = section == Section::Sort && def.base.eq_ignore_ascii_case("track");
         let noun = section.noun();
         let content = match section {
             Section::Sort => &mut def.sort,
@@ -275,6 +289,11 @@ impl App {
                 let has_text = !text.trim().is_empty();
                 options_menu(trigger, |ui| {
                     let mut choice = None;
+                    if show_shuffle
+                        && menu_item(ui, icons::SHUFFLE, "Shuffle", true, None).clicked()
+                    {
+                        choice = Some(OptionsChoice::UseShuffle);
+                    }
                     if menu_item(ui, icons::RESET, "Reset to default", true, None).clicked() {
                         choice = Some(OptionsChoice::Reset);
                     }
@@ -311,6 +330,11 @@ impl App {
                 self.preset_block(ui, &format!("PRESET {}", noun.to_uppercase()), id, false);
                 options_menu(trigger, |ui| {
                     let mut choice = None;
+                    if show_shuffle
+                        && menu_item(ui, icons::SHUFFLE, "Shuffle", true, None).clicked()
+                    {
+                        choice = Some(OptionsChoice::UseShuffle);
+                    }
                     if menu_item(ui, icons::RESET, "Reset to default", true, None).clicked() {
                         choice = Some(OptionsChoice::Reset);
                     }
@@ -337,16 +361,87 @@ impl App {
                     choice
                 })
             }
+            SectionContent::Builtin(builtin) => {
+                // A built-in preset gets a special yellow block. Its name expands
+                // to reveal the generated Querydown, and a "Reshuffle" button
+                // beside the name regenerates the seed in place — mutating (and
+                // re-running) the query so the ordering changes but stays stable
+                // across later refreshes.
+                let mut reshuffle = false;
+                section_frame(ui, PRESET_BG, |ui| {
+                    small_heading(ui, &format!("PRESET {}", noun.to_uppercase()));
+                    egui::collapsing_header::CollapsingState::load_with_default_open(
+                        ui.ctx(),
+                        ui.make_persistent_id(("builtin_preset", noun)),
+                        false,
+                    )
+                    .show_header(ui, |ui| {
+                        ui.label(builtin.name());
+                        let label = format!("{}  Reshuffle", icons::SHUFFLE.codepoint);
+                        reshuffle = ui.button(label).clicked();
+                    })
+                    .body(|ui| {
+                        ui.label(egui::RichText::new(builtin.querydown()).monospace());
+                    });
+                });
+                if reshuffle {
+                    builtin.reshuffle();
+                    *run = true;
+                }
+                options_menu(trigger, |ui| {
+                    let mut choice = None;
+                    if show_shuffle
+                        && menu_item(ui, icons::SHUFFLE, "Shuffle", true, None).clicked()
+                    {
+                        choice = Some(OptionsChoice::UseShuffle);
+                    }
+                    if menu_item(ui, icons::RESET, "Reset to default", true, None).clicked() {
+                        choice = Some(OptionsChoice::Reset);
+                    }
+                    if let Some(id) = preset_submenu(ui, "Replace with preset", &available) {
+                        choice = Some(OptionsChoice::UsePreset(id));
+                    }
+                    if menu_item(
+                        ui,
+                        icons::MANAGE_PRESETS,
+                        &format!("Manage {} presets", noun.to_lowercase()),
+                        true,
+                        None,
+                    )
+                    .clicked()
+                    {
+                        choice = Some(OptionsChoice::Manage);
+                    }
+                    choice
+                })
+            }
         };
 
         match choice {
-            Some(OptionsChoice::Reset) => *content = SectionContent::default(),
+            Some(OptionsChoice::Reset) => {
+                // Resetting away from a preset (or built-in) removes it, so refresh.
+                if matches!(
+                    content,
+                    SectionContent::Preset(_) | SectionContent::Builtin(_)
+                ) {
+                    *run = true;
+                }
+                *content = SectionContent::default();
+            }
             Some(OptionsChoice::SaveAsPreset) => {
                 if let SectionContent::Custom(text) = content {
                     save_as = Some(text.clone());
                 }
             }
-            Some(OptionsChoice::UsePreset(id)) => *content = SectionContent::Preset(id),
+            // Applying a preset or the built-in Shuffle changes the results, so refresh.
+            Some(OptionsChoice::UsePreset(id)) => {
+                *content = SectionContent::Preset(id);
+                *run = true;
+            }
+            Some(OptionsChoice::UseShuffle) => {
+                *content = SectionContent::Builtin(BuiltinPreset::shuffle());
+                *run = true;
+            }
             Some(OptionsChoice::ConvertToCustom) => {
                 if let SectionContent::Preset(id) = content {
                     let text = self
@@ -694,6 +789,7 @@ enum OptionsChoice {
     Reset,
     SaveAsPreset,
     UsePreset(Uuid),
+    UseShuffle,
     ConvertToCustom,
     EditPreset(Uuid),
     Manage,
@@ -774,19 +870,22 @@ fn options_menu<T>(
         .and_then(|inner| inner.inner)
 }
 
-/// A "… ▶" submenu listing presets by name. Returns the clicked preset id.
-/// The preset glyph is inlined in the label text; Material Symbols are
-/// registered as a fallback on the proportional family, so it renders inline.
+/// A "… ▶" submenu listing user-defined presets by name, each with the
+/// preset/approval icon. Returns the clicked preset id. The submenu-button glyph
+/// is inlined in the label text; Material Symbols are registered as a fallback on
+/// the proportional family, so it renders inline.
 fn preset_submenu(ui: &mut egui::Ui, label: &str, presets: &[(Uuid, String)]) -> Option<Uuid> {
     let label = format!("{}  {label}", icons::PRESET.codepoint);
     let (_, inner) = egui::containers::menu::SubMenuButton::new(label).ui(ui, |ui| {
-        ui.set_min_width(150.0);
+        // A fixed (narrow) width: the icon-bearing `menu_item` rows each claim the
+        // full available width, so without an upper bound the submenu stretches.
+        ui.set_width(150.0);
         let mut choice = None;
         if presets.is_empty() {
             ui.weak("No presets");
         }
         for (id, name) in presets {
-            if ui.button(name).clicked() {
+            if menu_item(ui, icons::PRESET, name, true, None).clicked() {
                 choice = Some(*id);
             }
         }
