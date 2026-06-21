@@ -15,10 +15,19 @@ pub(crate) fn detect_track_column(
 ) {
     #[cfg(not(target_arch = "wasm32"))]
     {
-        std::thread::spawn(move || {
-            let result = compute(&query);
-            apply(result, &state, &ctx);
-        });
+        // `compute` parses the SQL and recursively walks the resulting AST, which can be
+        // deep for nested expressions (e.g. the `contains(lower(strip_accents(...)))` a
+        // `:` match compiles to). The default 2 MiB worker-thread stack overflows on such
+        // input in debug builds, so we give it generous headroom and a name (an unnamed
+        // thread reports as `<unknown>` if it ever does overflow).
+        std::thread::Builder::new()
+            .name("lineage".into())
+            .stack_size(16 * 1024 * 1024)
+            .spawn(move || {
+                let result = compute(&query);
+                apply(result, &state, &ctx);
+            })
+            .expect("failed to spawn lineage thread");
     }
     #[cfg(target_arch = "wasm32")]
     {
