@@ -1,7 +1,14 @@
 use duckdb::Connection;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 static DB_FILE_NAME: &str = "collectune.db";
+
+/// The default location of the database file when the user does not supply a
+/// custom path: `collectune.db` within the collection root.
+#[must_use]
+pub fn default_db_path(collection_path: &Path) -> PathBuf {
+    collection_path.join(DB_FILE_NAME)
+}
 
 struct Migration {
     version: u32,
@@ -40,9 +47,8 @@ fn run_migration(conn: &mut Connection, migration: &Migration) -> Result<(), duc
     Ok(())
 }
 
-pub fn get_db(collection_path: &Path) -> Result<Connection, Box<dyn std::error::Error>> {
-    let db_path = collection_path.join(DB_FILE_NAME);
-    let mut conn = Connection::open(&db_path)?;
+pub fn get_db(db_path: &Path) -> Result<Connection, Box<dyn std::error::Error>> {
+    let mut conn = Connection::open(db_path)?;
     init_db_version_metadata(&conn)?;
     let current_version = get_current_version(&conn)?;
     let pending_migrations = MIGRATIONS

@@ -4,7 +4,7 @@ use axum::response::{IntoResponse, Response};
 use backend::{db, scanner, server};
 use clap::Parser;
 use rust_embed::Embed;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 #[derive(Embed)]
 #[folder = "../frontend/dist/"]
@@ -20,6 +20,10 @@ struct Args {
     /// Start without running a full collection scan
     #[arg(long)]
     no_scan: bool,
+
+    /// Path to the database file (defaults to `collectune.db` in the collection root)
+    #[arg(long)]
+    db_path: Option<PathBuf>,
 
     /// Port to listen on
     #[arg(short, long, default_value_t = 3000)]
@@ -54,7 +58,10 @@ async fn static_handler(uri: Uri) -> Response {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
     let collection_path = get_collection_path(&args.collection_path)?;
-    let conn = db::get_db(collection_path)?;
+    let db_path = args
+        .db_path
+        .unwrap_or_else(|| db::default_db_path(collection_path));
+    let conn = db::get_db(&db_path)?;
     if !args.no_scan {
         scanner::scan(collection_path, &conn)?;
     }
