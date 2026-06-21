@@ -23,6 +23,7 @@ mod page;
 mod query_def;
 mod results;
 mod rpc;
+mod schema;
 #[cfg(target_arch = "wasm32")]
 mod web;
 mod welcome;
@@ -621,8 +622,8 @@ impl App {
             s.needs_revalidation = true;
         }
 
-        // Assemble the four query parts into Querydown source, then compile it
-        // into DuckDB SQL before running it.
+        // Resolve the four query parts into per-section Querydown source, then
+        // compile it into DuckDB SQL before running it.
         let compiled = {
             let schema = self.schema.lock().unwrap();
             match (definition.assemble(&self.presets), schema.as_deref()) {
@@ -630,8 +631,8 @@ impl App {
                 (_, None) => {
                     Err("Schema not loaded yet. Please try again in a moment.".to_string())
                 }
-                (Ok(source), Some(schema_json)) => {
-                    compile::querydown_to_duckdb(&source, schema_json)
+                (Ok(sections), Some(schema_json)) => {
+                    compile::querydown_to_duckdb(&sections, schema_json)
                 }
             }
         };

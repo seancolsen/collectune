@@ -1,7 +1,8 @@
 //! The structured, four-part query definition: base table, filter, sort, and
 //! display (result columns). Each of the last three sections holds raw
-//! Querydown fragments and/or references to saved presets, and the whole
-//! definition is assembled back into a single Querydown query at run time.
+//! Querydown fragments and/or references to saved presets, and at run time the
+//! definition is resolved into per-section Querydown source ([`QuerySections`]),
+//! which the compiler parses one section at a time.
 
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -128,34 +129,62 @@ impl QueryDefinition {
         }
     }
 
-    /// Stitches the four parts back into a single Querydown query, resolving
-    /// preset references against the loaded preset list. Sections are plain
-    /// fragments concatenated in the order the language requires: base table,
-    /// conditions (custom then presets — top-level conditions combine as AND),
-    /// `\\` sorting expressions, then `$` result columns.
-    pub(crate) fn assemble(&self, presets: &[Preset]) -> Result<String, String> {
+    /// Resolves the definition into per-section Querydown source, resolving each
+    /// preset reference against the loaded preset list. Unlike a single assembled
+    /// query string, the sections are kept apart so the compiler can parse each
+    /// one with its own section parser — which keeps filter, sort, and display
+    /// syntax from leaking across section boundaries.
+    ///
+    /// The filter section concatenates the custom conditions with each preset's
+    /// fragment (whitespace-separated); top-level conditions combine as AND. The
+    /// sort and display sections each resolve to a single fragment.
+    pub(crate) fn assemble(&self, presets: &[Preset]) -> Result<QuerySections, String> {
         let base = self.base.trim();
         if base.is_empty() {
             return Err("No base table selected.".to_string());
         }
-        let mut parts = vec![format!("#{base}")];
-        let mut push = |fragment: &str| {
-            if !fragment.trim().is_empty() {
-                parts.push(fragment.trim().to_string());
-            }
-        };
-        push(&self.filter.custom);
+        let mut filter_parts: Vec<&str> = Vec::new();
+        let custom = self.filter.custom.trim();
+        if !custom.is_empty() {
+            filter_parts.push(custom);
+        }
         for id in &self.filter.presets {
-            push(preset_definition(presets, *id)?);
-        }
-        for content in [&self.sort, &self.display] {
-            match content {
-                SectionContent::Custom(text) => push(text),
-                SectionContent::Preset(id) => push(preset_definition(presets, *id)?),
+            let fragment = preset_definition(presets, *id)?.trim();
+            if !fragment.is_empty() {
+                filter_parts.push(fragment);
             }
         }
-        Ok(parts.join("\n"))
+        Ok(QuerySections {
+            base: base.to_string(),
+            filter: filter_parts.join("\n"),
+            sort: resolve_section(&self.sort, presets)?,
+            display: resolve_section(&self.display, presets)?,
+        })
     }
+}
+
+/// A query's four parts resolved into per-section Querydown source, ready to be
+/// parsed section-by-section by the compiler. Preset references have been
+/// resolved to their underlying fragments (and, for the filter, concatenated).
+pub(crate) struct QuerySections {
+    /// The base table name, without the `#` sigil.
+    pub(crate) base: String,
+    /// Filter conditions: custom code followed by each preset's fragment.
+    pub(crate) filter: String,
+    /// Standalone `\\` sorting expressions.
+    pub(crate) sort: String,
+    /// `$`-prefixed result columns.
+    pub(crate) display: String,
+}
+
+/// Resolves a sort/display section to its Querydown fragment, looking up a
+/// preset reference against `presets`.
+fn resolve_section(content: &SectionContent, presets: &[Preset]) -> Result<String, String> {
+    let text = match content {
+        SectionContent::Custom(text) => text.as_str(),
+        SectionContent::Preset(id) => preset_definition(presets, *id)?,
+    };
+    Ok(text.trim().to_string())
 }
 
 fn preset_definition(presets: &[Preset], id: Uuid) -> Result<&str, String> {

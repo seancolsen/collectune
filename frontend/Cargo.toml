@@ -25,7 +25,7 @@ egui_material_icons = { version = "0.6", default-features = false, features = ["
 futures-util = "0.3"
 jiff = "0.2"
 polyglot-sql = { version = "0.4", default-features = false, features = ["semantic", "dialect-duckdb", "dialect-postgresql", "transpile"] }
-querydown = { git = "https://github.com/seancolsen/querydown", rev = "f931b5f2941bc912b08ef58bd3e620cb38fcc61e" }
+querydown = { git = "https://github.com/seancolsen/querydown", rev = "94e081f4bdd47376427f1551486ae89c48f16ff0" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 uuid = { version = "1", features = ["v4", "serde"] }

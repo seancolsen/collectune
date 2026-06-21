@@ -1,6 +1,8 @@
 use std::sync::{Arc, Mutex};
 
-use arrow_array::{Array, ArrayRef, LargeListArray, ListArray, RecordBatch, StringArray};
+use arrow_array::{
+    Array, ArrayRef, LargeListArray, LargeStringArray, ListArray, RecordBatch, StringArray,
+};
 use arrow_buffer::Buffer;
 use arrow_cast::display::{ArrayFormatter, FormatOptions};
 use arrow_ipc::reader::StreamDecoder;
@@ -27,59 +29,54 @@ pub(crate) fn run_query(query: String, state: &Arc<Mutex<QueryState>>, ctx: &egu
     stream_query(query, handler, on_done);
 }
 
-/// Fetches the database schema JSON once at startup and stores it in `schema`.
+/// Introspects the database into Querydown schema JSON once at startup and stores
+/// the result in `schema`.
+///
+/// Querydown supplies the introspection SQL, which we run through the ordinary query
+/// API like any other query. It returns a single JSON document, which we then enrich
+/// with our convention-inferred table links (see [`crate::schema`]) before storing it
+/// for the compiler to use.
 pub(crate) fn fetch_schema(schema: Arc<Mutex<Option<String>>>, ctx: egui::Context) {
-    let store = move |json: String| {
-        *schema.lock().unwrap() = Some(json);
-        ctx.request_repaint();
+    let raw_json: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+    let handler = {
+        let raw_json = Arc::clone(&raw_json);
+        move |batch: &RecordBatch| {
+            if let Some(json) = first_string_cell(batch) {
+                *raw_json.lock().unwrap() = Some(json);
+            }
+            Ok::<(), String>(())
+        }
     };
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        std::thread::spawn(move || {
-            let rt = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .expect("build tokio runtime");
-            if let Ok(json) = rt.block_on(fetch_schema_native()) {
-                store(json);
-            }
-        });
-    }
-    #[cfg(target_arch = "wasm32")]
-    {
-        wasm_bindgen_futures::spawn_local(async move {
-            if let Ok(json) = fetch_schema_wasm().await {
-                store(json);
-            }
-        });
-    }
+    let on_done = move |result: Result<(), String>| {
+        if result.is_err() {
+            return;
+        }
+        let Some(raw) = raw_json.lock().unwrap().take() else {
+            return;
+        };
+        if let Ok(enriched) = crate::schema::add_inferred_links(&raw) {
+            *schema.lock().unwrap() = Some(enriched);
+            ctx.request_repaint();
+        }
+    };
+    stream_query(crate::schema::introspection_sql(), handler, on_done);
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-async fn fetch_schema_native() -> Result<String, String> {
-    let url = format!("{BASE}/schema");
-    let resp = reqwest::Client::new()
-        .get(&url)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-    if !resp.status().is_success() {
-        return Err(format!("{}", resp.status()));
+/// Extracts the first row's first column as a string, for queries (like schema
+/// introspection) that return a single scalar cell. Handles both 32- and 64-bit
+/// offset string arrays.
+fn first_string_cell(batch: &RecordBatch) -> Option<String> {
+    if batch.num_rows() == 0 || batch.num_columns() == 0 {
+        return None;
     }
-    resp.text().await.map_err(|e| e.to_string())
-}
-
-#[cfg(target_arch = "wasm32")]
-async fn fetch_schema_wasm() -> Result<String, String> {
-    let url = format!("{BASE}/schema");
-    let resp = gloo_net::http::Request::get(&url)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-    if !resp.ok() {
-        return Err(format!("{}", resp.status()));
+    let col = batch.column(0);
+    if let Some(arr) = col.as_any().downcast_ref::<StringArray>() {
+        return (!arr.is_null(0)).then(|| arr.value(0).to_string());
     }
-    resp.text().await.map_err(|e| e.to_string())
+    if let Some(arr) = col.as_any().downcast_ref::<LargeStringArray>() {
+        return (!arr.is_null(0)).then(|| arr.value(0).to_string());
+    }
+    None
 }
 
 pub(crate) fn fetch_track_metadata(

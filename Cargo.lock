@@ -3818,7 +3818,7 @@ dependencies = [
 [[package]]
 name = "querydown"
 version = "0.0.1"
-source = "git+https://github.com/seancolsen/querydown?rev=f931b5f2941bc912b08ef58bd3e620cb38fcc61e#f931b5f2941bc912b08ef58bd3e620cb38fcc61e"
+source = "git+https://github.com/seancolsen/querydown?rev=94e081f4bdd47376427f1551486ae89c48f16ff0#94e081f4bdd47376427f1551486ae89c48f16ff0"
 dependencies = [
  "itertools",
  "querydown-parser",
@@ -3829,7 +3829,7 @@ dependencies = [
 [[package]]
 name = "querydown-parser"
 version = "0.0.1"
-source = "git+https://github.com/seancolsen/querydown?rev=f931b5f2941bc912b08ef58bd3e620cb38fcc61e#f931b5f2941bc912b08ef58bd3e620cb38fcc61e"
+source = "git+https://github.com/seancolsen/querydown?rev=94e081f4bdd47376427f1551486ae89c48f16ff0#94e081f4bdd47376427f1551486ae89c48f16ff0"
 dependencies = [
  "chumsky",
  "serde",

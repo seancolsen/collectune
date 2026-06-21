@@ -267,7 +267,10 @@ mod tests {
     fn parses_formatter_blob() {
         let meta = object(vec![(
             "formatter",
-            object(vec![("type", AnnotationValue::String("duration".to_string()))]),
+            object(vec![(
+                "type",
+                AnnotationValue::String("duration".to_string()),
+            )]),
         )]);
         let m = ColumnMetadata::from_meta(Some(&meta));
         assert_eq!(m.formatter, Some(Formatter::Duration {}));
