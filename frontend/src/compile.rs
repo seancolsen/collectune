@@ -1,12 +1,11 @@
 //! Compiles a user-authored Querydown query into `DuckDB` SQL.
 //!
-//! Querydown emits `PostgreSQL`, so we transpile its output to `DuckDB` with
-//! polyglot-sql before handing the SQL off to the query API.
+//! Querydown emits `DuckDB` SQL directly via its `DuckDB` dialect, so the SQL it
+//! produces is handed straight off to the query API.
 
-use polyglot_sql::{DialectType, transpile};
 use querydown::ast::{Definitions, Query};
 use querydown::{
-    Compiler, IdentifierResolution, Options, Postgres, parse, parse_conditions, parse_display,
+    Compiler, DuckDB, IdentifierResolution, Options, parse, parse_conditions, parse_display,
     parse_sorting,
 };
 
@@ -39,7 +38,7 @@ pub(crate) fn querydown_to_duckdb(
         CompileSource::Full(text) => parse(text).map_err(|e| format!("Querydown: {e}"))?,
     };
     let options = Options {
-        dialect: Box::new(Postgres()),
+        dialect: Box::new(DuckDB()),
         identifier_resolution: IdentifierResolution::Flexible,
     };
     let compiler = Compiler::new(schema_json, options)?;
@@ -49,10 +48,8 @@ pub(crate) fn querydown_to_duckdb(
         .iter()
         .map(|meta| ColumnMetadata::from_meta(meta.as_ref()))
         .collect();
-    let statements = transpile(&result.sql, DialectType::PostgreSQL, DialectType::DuckDB)
-        .map_err(|e| e.to_string())?;
     Ok(CompiledQuery {
-        sql: statements.join("\n"),
+        sql: result.sql,
         columns,
     })
 }
