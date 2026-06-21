@@ -72,12 +72,27 @@ pub(crate) struct QueryDefinition {
     pub(crate) filter: FilterParts,
     pub(crate) sort: SectionContent,
     pub(crate) display: SectionContent,
+    /// When `Some`, the query is in full-querydown mode: this holds the entire
+    /// hand-written query and the sectioned parts above are ignored. `None`
+    /// (the default) is the sectioned mode driven by the builder UIs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) full: Option<String>,
 }
 
 impl QueryDefinition {
-    /// Whether there is enough here to compile: a base table has been chosen.
+    /// Whether this query is in full-querydown mode (a single hand-written query)
+    /// rather than the default sectioned mode.
+    pub(crate) fn is_full(&self) -> bool {
+        self.full.is_some()
+    }
+
+    /// Whether there is enough here to compile: in full mode, non-empty query
+    /// text; otherwise a base table has been chosen.
     pub(crate) fn is_runnable(&self) -> bool {
-        !self.base.trim().is_empty()
+        match &self.full {
+            Some(full) => !full.trim().is_empty(),
+            None => !self.base.trim().is_empty(),
+        }
     }
 
     /// The JSON form persisted in the backend's `query.definition` column.
@@ -126,6 +141,7 @@ impl QueryDefinition {
             },
             sort: SectionContent::Custom(sort.to_string()),
             display: SectionContent::Custom(display.to_string()),
+            full: None,
         }
     }
 
@@ -138,7 +154,14 @@ impl QueryDefinition {
     /// The filter section concatenates the custom conditions with each preset's
     /// fragment (whitespace-separated); top-level conditions combine as AND. The
     /// sort and display sections each resolve to a single fragment.
-    pub(crate) fn assemble(&self, presets: &[Preset]) -> Result<QuerySections, String> {
+    pub(crate) fn assemble(&self, presets: &[Preset]) -> Result<CompileSource, String> {
+        if let Some(full) = &self.full {
+            let full = full.trim();
+            if full.is_empty() {
+                return Err("The query is empty.".to_string());
+            }
+            return Ok(CompileSource::Full(full.to_string()));
+        }
         let base = self.base.trim();
         if base.is_empty() {
             return Err("No base table selected.".to_string());
@@ -154,13 +177,56 @@ impl QueryDefinition {
                 filter_parts.push(fragment);
             }
         }
-        Ok(QuerySections {
+        Ok(CompileSource::Sections(QuerySections {
             base: base.to_string(),
             filter: filter_parts.join("\n"),
             sort: resolve_section(&self.sort, presets)?,
             display: resolve_section(&self.display, presets)?,
-        })
+        }))
     }
+
+    /// Converts this definition into a single full-querydown string for the
+    /// full-query editor: the base table prefixed with `#`, then the filter,
+    /// sort, and display fragments concatenated (newline-separated). Preset
+    /// references are resolved against `presets`; a missing preset's fragment is
+    /// simply omitted so the conversion always yields editable text. An
+    /// already-full definition returns its existing text unchanged.
+    pub(crate) fn to_full_query(&self, presets: &[Preset]) -> String {
+        if let Some(full) = &self.full {
+            return full.clone();
+        }
+        let mut filter_parts: Vec<String> = Vec::new();
+        let custom = self.filter.custom.trim();
+        if !custom.is_empty() {
+            filter_parts.push(custom.to_string());
+        }
+        for id in &self.filter.presets {
+            if let Ok(fragment) = preset_definition(presets, *id) {
+                let fragment = fragment.trim();
+                if !fragment.is_empty() {
+                    filter_parts.push(fragment.to_string());
+                }
+            }
+        }
+        let sort = resolve_section(&self.sort, presets).unwrap_or_default();
+        let display = resolve_section(&self.display, presets).unwrap_or_default();
+        let mut parts = vec![format!("#{}", self.base.trim())];
+        for fragment in [filter_parts.join("\n"), sort, display] {
+            let fragment = fragment.trim();
+            if !fragment.is_empty() {
+                parts.push(fragment.to_string());
+            }
+        }
+        parts.join("\n")
+    }
+}
+
+/// What [`QueryDefinition::assemble`] resolves a query into for compilation:
+/// either the per-section Querydown source (sectioned mode) or a single
+/// hand-written query (full-querydown mode).
+pub(crate) enum CompileSource {
+    Sections(QuerySections),
+    Full(String),
 }
 
 /// A query's four parts resolved into per-section Querydown source, ready to be

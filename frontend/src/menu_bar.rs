@@ -1,7 +1,9 @@
 //! The top menu bar: the explorer toggle, the current query's name (with a
 //! superscript unsaved-changes marker and an inline save button right after it),
 //! the query options ("⋮") menu — which also holds the Base-table selector as a
-//! submenu — and the Filter/Sort/Display builder toggles plus the run button.
+//! submenu — and the builder toggles plus the run button. The builder toggles are
+//! the Filter/Sort/Display buttons in sectioned mode, or a single "Querydown"
+//! toggle in full-querydown mode.
 
 use std::sync::{Arc, Mutex};
 
@@ -25,6 +27,15 @@ const COMPACT_MENU_BAR_WIDTH: f32 = 500.0;
 enum PageMenu {
     Action(QueryAction),
     Base(String),
+    /// Switch the query into full-querydown mode (from the Base submenu's
+    /// "Full query" item or the "Convert to full query" action).
+    ConvertToFull,
+}
+
+/// A choice from the Base submenu: a specific base table, or full-querydown mode.
+enum BaseChoice {
+    Table(String),
+    Full,
 }
 
 impl App {
@@ -44,6 +55,10 @@ impl App {
         let base_table = self
             .current_page()
             .map_or(String::new(), |p| p.live.definition.base.clone());
+        let full_mode = self
+            .current_page()
+            .is_some_and(|p| p.live.definition.is_full());
+        let full_editor_open = self.full_editor_open;
         let running = self
             .current_page()
             .is_some_and(|p| p.results.lock().unwrap().running);
@@ -57,6 +72,8 @@ impl App {
         let mut toggle_organizer = false;
         let mut section_clicked = None;
         let mut section_menu_anchor = None;
+        let mut toggle_full_editor = false;
+        let mut convert_to_full = false;
         let mut base_choice = None;
         let mut run_now = false;
         let mut save_now = false;
@@ -96,16 +113,30 @@ impl App {
                             // Restore normal inter-widget spacing inside the controls.
                             ui.spacing_mut().item_spacing.x = item_spacing_x;
                             ui.add_space(8.0);
-                            match draw_page_menu_button(ui, &base_table, show_revert, &schema) {
+                            match draw_page_menu_button(
+                                ui,
+                                &base_table,
+                                full_mode,
+                                show_revert,
+                                &schema,
+                            ) {
                                 Some(PageMenu::Base(table)) => base_choice = Some(table),
+                                Some(PageMenu::ConvertToFull) => convert_to_full = true,
                                 Some(PageMenu::Action(QueryAction::Rename)) => want_rename = true,
                                 Some(PageMenu::Action(QueryAction::Revert)) => want_revert = true,
                                 Some(PageMenu::Action(QueryAction::Delete)) => want_delete = true,
                                 None => {}
                             }
-                            let sections = draw_section_buttons(ui, builder_section, compact);
-                            section_clicked = sections.clicked;
-                            section_menu_anchor = sections.menu;
+                            // Full mode replaces the Filter/Sort/Display section
+                            // toggles with a single, menu-less "Querydown" toggle.
+                            if full_mode {
+                                toggle_full_editor =
+                                    draw_querydown_button(ui, full_editor_open, compact);
+                            } else {
+                                let sections = draw_section_buttons(ui, builder_section, compact);
+                                section_clicked = sections.clicked;
+                                section_menu_anchor = sections.menu;
+                            }
                             if !compact {
                                 ui.separator();
                             }
@@ -159,6 +190,13 @@ impl App {
             } else {
                 Some(section)
             };
+        }
+        // The "Querydown" button is a toggle for the full-query editor panel.
+        if toggle_full_editor {
+            self.full_editor_open = !self.full_editor_open;
+        }
+        if convert_to_full {
+            self.convert_current_to_full();
         }
         if let Some(table) = base_choice
             && self
@@ -259,6 +297,7 @@ fn draw_page_name(
 fn draw_page_menu_button(
     ui: &mut egui::Ui,
     base_table: &str,
+    full_mode: bool,
     show_revert: bool,
     schema: &Arc<Mutex<Option<String>>>,
 ) -> Option<PageMenu> {
@@ -266,10 +305,18 @@ fn draw_page_menu_button(
     egui::Popup::menu(&dots)
         .align(egui::RectAlign::TOP_END)
         .show(|ui| {
-            ui.set_width(150.0);
+            ui.set_width(210.0);
             let mut chosen = None;
-            if let Some(table) = base_submenu(ui, base_table, schema) {
-                chosen = Some(PageMenu::Base(table));
+            match base_submenu(ui, base_table, full_mode, schema) {
+                Some(BaseChoice::Table(table)) => chosen = Some(PageMenu::Base(table)),
+                Some(BaseChoice::Full) => chosen = Some(PageMenu::ConvertToFull),
+                None => {}
+            }
+            // Convert-to-full is a no-op once already in full mode, so hide it then.
+            if !full_mode
+                && menu_item(ui, icons::QUERYDOWN, "Convert to full query", true, None).clicked()
+            {
+                chosen = Some(PageMenu::ConvertToFull);
             }
             if menu_item(ui, icons::RENAME, "Rename", true, None).clicked() {
                 chosen = Some(PageMenu::Action(QueryAction::Rename));
@@ -285,16 +332,20 @@ fn draw_page_menu_button(
         .and_then(|inner| inner.inner)
 }
 
-/// The "Base ▶" submenu listing every table in the schema. Returns the newly
-/// chosen base table, if any.
+/// The "Base ▶" submenu listing every table in the schema, followed (below a
+/// separator) by the "Full query" option that switches the query into
+/// full-querydown mode. The current selection is highlighted: a table in
+/// sectioned mode, or the full-query option in `full_mode`. Returns the chosen
+/// item, if any.
 fn base_submenu(
     ui: &mut egui::Ui,
     base_table: &str,
+    full_mode: bool,
     schema: &Arc<Mutex<Option<String>>>,
-) -> Option<String> {
+) -> Option<BaseChoice> {
     let label = format!("{}  Base", icons::BASE.codepoint);
     let (_, inner) = egui::containers::menu::SubMenuButton::new(label).ui(ui, |ui| {
-        ui.set_min_width(140.0);
+        ui.set_min_width(170.0);
         let tables = schema
             .lock()
             .unwrap()
@@ -308,9 +359,18 @@ fn base_submenu(
         let mut choice = None;
         for table in tables {
             let label = format!("{}  {table}", icons::TABLE.codepoint);
-            if ui.selectable_label(table == base_table, label).clicked() {
-                choice = Some(table);
+            // No table is the active base while in full mode.
+            if ui
+                .selectable_label(!full_mode && table == base_table, label)
+                .clicked()
+            {
+                choice = Some(BaseChoice::Table(table));
             }
+        }
+        ui.separator();
+        let label = format!("{}  Full query", icons::QUERYDOWN.codepoint);
+        if ui.selectable_label(full_mode, label).clicked() {
+            choice = Some(BaseChoice::Full);
         }
         choice
     });
@@ -362,6 +422,19 @@ fn draw_section_buttons(ui: &mut egui::Ui, open: Option<Section>, compact: bool)
         }
     }
     out
+}
+
+/// Draws the full-querydown mode's single "Querydown" toggle button (a menu-less
+/// [`SplitButton`]), which opens/closes the full-query editor panel. When
+/// `compact`, drops the text label to save room. Returns `true` when clicked.
+fn draw_querydown_button(ui: &mut egui::Ui, open: bool, compact: bool) -> bool {
+    SplitButton::new(icons::QUERYDOWN, "Querydown")
+        .active(open)
+        .show_label(!compact)
+        .show_menu(false)
+        .show(ui)
+        .main
+        .clicked()
 }
 
 /// The table names from the Querydown schema JSON.

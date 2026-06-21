@@ -140,6 +140,7 @@ pub(crate) struct SplitButton {
     label: String,
     active: bool,
     show_label: bool,
+    show_menu: bool,
 }
 
 /// The two independent responses produced by showing a [`SplitButton`].
@@ -158,6 +159,7 @@ impl SplitButton {
             label: label.into(),
             active: false,
             show_label: true,
+            show_menu: true,
         }
     }
 
@@ -172,6 +174,13 @@ impl SplitButton {
     /// trigger), dropping the text label to save horizontal space on narrow bars.
     pub(crate) fn show_label(mut self, show_label: bool) -> Self {
         self.show_label = show_label;
+        self
+    }
+
+    /// When `false`, the button never grows the embedded "⋮" menu trigger, even
+    /// while active — for a plain menu-less toggle.
+    pub(crate) fn show_menu(mut self, show_menu: bool) -> Self {
+        self.show_menu = show_menu;
         self
     }
 
@@ -203,8 +212,9 @@ impl SplitButton {
         }
         let galley = ui.painter().layout_job(job);
 
+        let with_menu = self.active && self.show_menu;
         let main_w = galley.size().x + PAD_X * 2.0;
-        let total_w = if self.active {
+        let total_w = if with_menu {
             main_w + MENU_TRIGGER_WIDTH
         } else {
             main_w
@@ -217,7 +227,7 @@ impl SplitButton {
 
         let main_rect = egui::Rect::from_min_size(rect.min, egui::vec2(main_w, SIZE));
         let main = ui.interact(main_rect, id.with("main"), egui::Sense::click());
-        let menu = self.active.then(|| {
+        let menu = with_menu.then(|| {
             let menu_rect = egui::Rect::from_min_max(main_rect.right_top(), rect.max);
             ui.interact(menu_rect, id.with("menu"), egui::Sense::click())
         });

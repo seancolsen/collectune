@@ -17,6 +17,8 @@ pub(crate) const TABLE: MaterialIcon = mi::ICON_TABLE;
 pub(crate) const FILTER: MaterialIcon = mi::ICON_FILTER_ALT;
 pub(crate) const SORT: MaterialIcon = mi::ICON_SWAP_VERT;
 pub(crate) const DISPLAY: MaterialIcon = mi::ICON_KEY_VISUALIZER;
+/// Full-querydown mode: the single-input raw-query editor and its toggle.
+pub(crate) const QUERYDOWN: MaterialIcon = mi::ICON_CODE;
 
 // Generic actions.
 /// Overflow ("⋮") menu trigger.

@@ -64,9 +64,15 @@ enum PresetBlockAction {
 impl App {
     /// The top panel below the menu bar holding the open builder section.
     pub(crate) fn render_builder_panel(&mut self, ui: &mut egui::Ui) {
-        let Some(section) = self.builder_section else {
+        let full_mode = self
+            .current_page()
+            .is_some_and(|p| p.live.definition.is_full());
+        let section = self.builder_section;
+        // In sectioned mode the panel shows the open builder section; bail when
+        // none is open. (Full mode has no section — it shows the full editor.)
+        if !full_mode && section.is_none() {
             return;
-        };
+        }
         // egui panels fix their height before rendering and clip any overflow;
         // they don't size to content. So we drive the height from the previous
         // frame's measured content height (captured below via the ScrollArea's
@@ -93,11 +99,15 @@ impl App {
                         return;
                     };
                     ui.add_space(6.0);
-                    let trigger = trigger.as_ref();
-                    match section {
-                        Section::Filter => self.filter_builder_ui(ui, def, trigger, &mut run),
-                        Section::Sort | Section::Display => {
-                            self.single_builder_ui(ui, section, def, trigger, &mut run);
+                    if full_mode {
+                        full_builder_ui(ui, def, &mut run);
+                    } else if let Some(section) = section {
+                        let trigger = trigger.as_ref();
+                        match section {
+                            Section::Filter => self.filter_builder_ui(ui, def, trigger, &mut run),
+                            Section::Sort | Section::Display => {
+                                self.single_builder_ui(ui, section, def, trigger, &mut run);
+                            }
                         }
                     }
                     ui.add_space(6.0);
@@ -687,6 +697,19 @@ enum OptionsChoice {
     ConvertToCustom,
     EditPreset(Uuid),
     Manage,
+}
+
+/// The full-querydown editor: a single large code editor bound to the query's
+/// full text. Full mode has no presets or section options, so this is just one
+/// custom block. Ctrl+Enter runs the query.
+fn full_builder_ui(ui: &mut egui::Ui, def: &mut QueryDefinition, run: &mut bool) {
+    let Some(text) = def.full.as_mut() else {
+        return;
+    };
+    section_frame(ui, CUSTOM_BG, |ui| {
+        small_heading(ui, "FULL QUERY");
+        code_editor(ui, text, 10, run);
+    });
 }
 
 /// A tinted rounded container used for custom (cyan) and preset (yellow) blocks.

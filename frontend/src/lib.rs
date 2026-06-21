@@ -150,8 +150,12 @@ pub struct App {
     pub(crate) rename: Option<Rename>,
     /// The query whose deletion is awaiting confirmation in the modal, if any.
     pub(crate) pending_delete: Option<PendingDelete>,
-    /// Which query-builder section (filter/sort/display) is open, if any.
+    /// Which query-builder section (filter/sort/display) is open, if any. Applies
+    /// to sectioned mode only.
     pub(crate) builder_section: Option<Section>,
+    /// Whether the full-querydown editor panel is open. Applies to full-querydown
+    /// mode only (the "Querydown" toolbar toggle).
+    pub(crate) full_editor_open: bool,
     /// The active section button's embedded "⋮" menu trigger, captured each
     /// frame by the menu bar so the builder panel (rendered just after) can
     /// anchor that section's options popup to the toolbar button.
@@ -198,6 +202,7 @@ impl Default for App {
             rename: None,
             pending_delete: None,
             builder_section: None,
+            full_editor_open: false,
             section_menu_anchor: None,
             builder_content_height: None,
             presets: Vec::new(),
@@ -240,7 +245,17 @@ impl eframe::App for App {
         match self.current {
             CurrentPage::Query(_) => {
                 self.render_menu_bar(ui);
-                if self.builder_section.is_some() {
+                // In full mode the panel is the full-query editor (gated by its
+                // own toggle); in sectioned mode it's the open builder section.
+                let full_mode = self
+                    .current_page()
+                    .is_some_and(|p| p.live.definition.is_full());
+                let show_builder = if full_mode {
+                    self.full_editor_open
+                } else {
+                    self.builder_section.is_some()
+                };
+                if show_builder {
                     self.render_builder_panel(ui);
                 }
             }
@@ -438,6 +453,23 @@ impl App {
         def
     }
 
+    /// Converts the current page's sectioned query into full-querydown mode by
+    /// concatenating its resolved parts into one query, and opens the full-query
+    /// editor so the result is immediately visible. A no-op if the query is
+    /// already in full mode.
+    pub(crate) fn convert_current_to_full(&mut self) {
+        let full = match self.current_page() {
+            Some(page) if !page.live.definition.is_full() => {
+                page.live.definition.to_full_query(&self.presets)
+            }
+            _ => return,
+        };
+        if let Some(page) = self.current_page_mut() {
+            page.live.definition.full = Some(full);
+        }
+        self.full_editor_open = true;
+    }
+
     pub(crate) fn select_page(&mut self, id: Uuid) {
         self.current = CurrentPage::Query(id);
         self.selection.clear();
@@ -631,8 +663,8 @@ impl App {
                 (_, None) => {
                     Err("Schema not loaded yet. Please try again in a moment.".to_string())
                 }
-                (Ok(sections), Some(schema_json)) => {
-                    compile::querydown_to_duckdb(&sections, schema_json)
+                (Ok(source), Some(schema_json)) => {
+                    compile::querydown_to_duckdb(&source, schema_json)
                 }
             }
         };
