@@ -833,7 +833,8 @@ impl App {
                 state.section.noun().to_lowercase()
             ));
             ui.add_space(8.0);
-            let field = ui.add(
+            let field = crate::text_input::add(
+                ui,
                 egui::TextEdit::singleline(&mut state.name)
                     .hint_text("Preset name")
                     .desired_width(f32::INFINITY),
@@ -881,7 +882,8 @@ impl App {
             ui.set_max_width(280.0);
             ui.heading("Rename preset");
             ui.add_space(8.0);
-            let field = ui.add(
+            let field = crate::text_input::add(
+                ui,
                 egui::TextEdit::singleline(&mut state.name)
                     .hint_text("Preset name")
                     .desired_width(f32::INFINITY),
@@ -1068,27 +1070,39 @@ fn filter_custom_input(
     reserve_for_cards: f32,
 ) -> Option<CustomChoice> {
     let has_text = !custom.trim().is_empty();
+    // The trigger now sits inside the input rather than after it, so shrink the
+    // editor's content width by the trigger's footprint to keep the whole input
+    // within the available width.
     let spacing = ui.spacing().item_spacing.x;
-    let btn_w = if has_text {
+    let trigger_reserve = if has_text {
         crate::button::SIZE + spacing
     } else {
         0.0
     };
-    let w = (ui.available_width() - reserve_for_cards - btn_w).max(40.0);
-    code_editor(ui, custom, w, focus, run);
+    let w = (ui.available_width() - reserve_for_cards - trigger_reserve).max(40.0);
+
+    // With no text there's nothing the menu can act on, so show a plain input.
     if !has_text {
+        code_editor(ui, custom, w, focus, run);
         return None;
     }
-    dots_menu(ui, |ui| {
-        let mut choice = None;
-        if menu_item(ui, icons::CLEAR, "Clear", true, None).clicked() {
-            choice = Some(CustomChoice::Clear);
-        }
-        if menu_item(ui, icons::SAVE, "Save as preset", base_chosen, None).clicked() {
-            choice = Some(CustomChoice::Save);
-        }
-        choice
-    })
+
+    let (output, trigger) = crate::text_input::with_menu(ui, monospace_edit(custom, w));
+    drive_code_editor(ui, output, custom, focus, run);
+    egui::Popup::menu(&trigger)
+        .align(egui::RectAlign::BOTTOM_END)
+        .show(|ui| {
+            ui.set_width(190.0);
+            let mut choice = None;
+            if menu_item(ui, icons::CLEAR, "Clear", true, None).clicked() {
+                choice = Some(CustomChoice::Clear);
+            }
+            if menu_item(ui, icons::SAVE, "Save as preset", base_chosen, None).clicked() {
+                choice = Some(CustomChoice::Save);
+            }
+            choice
+        })
+        .and_then(|inner| inner.inner)
 }
 
 /// A collapsed filter preset card: a small "PRESET" heading (with an unsaved
@@ -1170,12 +1184,29 @@ fn small_heading(ui: &mut egui::Ui, text: &str) {
 /// When `focus`, it grabs focus once with the caret at the end. Ctrl+Enter
 /// requests a query run.
 fn code_editor(ui: &mut egui::Ui, text: &mut String, width: f32, focus: bool, run: &mut bool) {
+    let output = crate::text_input::show(ui, monospace_edit(text, width));
+    drive_code_editor(ui, output, text, focus, run);
+}
+
+/// Builds the auto-sizing monospace `TextEdit` shared by every Querydown editor:
+/// it grows to its line count (at least one line) and fills `width`.
+fn monospace_edit(text: &mut String, width: f32) -> egui::TextEdit<'_> {
     let rows = text.lines().count().max(1);
-    let mut output = egui::TextEdit::multiline(text)
+    egui::TextEdit::multiline(text)
         .desired_width(width)
         .desired_rows(rows)
         .font(egui::TextStyle::Monospace)
-        .show(ui);
+}
+
+/// Applies a code editor's behavior to a shown editor's `output`: optional
+/// one-time focus with the caret at the end, and Ctrl+Enter to request a run.
+fn drive_code_editor(
+    ui: &mut egui::Ui,
+    mut output: egui::widgets::text_edit::TextEditOutput,
+    text: &str,
+    focus: bool,
+    run: &mut bool,
+) {
     if focus {
         output.response.request_focus();
         let end = text.chars().count();
@@ -1198,13 +1229,7 @@ fn code_editor(ui: &mut egui::Ui, text: &mut String, width: f32, focus: bool, ru
 /// A monospace multiline editor that auto-sizes to its line count (at least one
 /// line), for preset definitions. `width` is the desired width.
 fn sized_multiline(ui: &mut egui::Ui, text: &mut String, width: f32) -> egui::Response {
-    let rows = text.lines().count().max(1);
-    ui.add(
-        egui::TextEdit::multiline(text)
-            .desired_width(width)
-            .desired_rows(rows)
-            .font(egui::TextStyle::Monospace),
-    )
+    crate::text_input::add(ui, monospace_edit(text, width))
 }
 
 /// The width of `text` laid out without wrapping in `font`.

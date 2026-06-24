@@ -123,10 +123,12 @@ pub(crate) fn inline_rename_field(
     id: egui::Id,
     width: f32,
 ) -> RenameOutcome {
-    let mut output = egui::TextEdit::singleline(buffer)
-        .id(id)
-        .desired_width(width)
-        .show(ui);
+    let mut output = crate::text_input::show(
+        ui,
+        egui::TextEdit::singleline(buffer)
+            .id(id)
+            .desired_width(width),
+    );
 
     if *take_focus {
         output.response.request_focus();

@@ -24,6 +24,7 @@ mod query_def;
 mod results;
 mod rpc;
 mod schema;
+mod text_input;
 #[cfg(target_arch = "wasm32")]
 mod web;
 mod welcome;
@@ -52,6 +53,7 @@ pub(crate) const ORGANIZER_SWIPE_VELOCITY: f32 = 400.0;
 pub(crate) const ORGANIZER_DRAG_FRICTION: f32 = 16.0;
 
 pub(crate) const ACCENT_BLUE: egui::Color32 = egui::Color32::from_rgb(0xBC, 0xD0, 0xEA);
+pub(crate) const HOVER_BLUE: egui::Color32 = egui::Color32::from_rgb(0x77, 0xA5, 0xCE);
 
 pub fn setup_fonts(ctx: &egui::Context) {
     ctx.set_visuals(egui::Visuals::light());

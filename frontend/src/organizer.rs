@@ -291,7 +291,8 @@ fn draw_query_list(
     ui.horizontal(|ui| {
         ui.add_space(12.0);
         // Widen the filter so its right edge lines up with the add button's.
-        ui.add(
+        crate::text_input::add(
+            ui,
             egui::TextEdit::singleline(filter)
                 .hint_text("Filter")
                 .desired_width(ORGANIZER_WIDTH - 24.0),
