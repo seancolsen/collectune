@@ -29,7 +29,7 @@ mod web;
 mod welcome;
 
 use audio::AudioPlayer;
-use builder::{ManageScope, PresetEdit, PresetSave};
+use builder::{ManageScope, PresetEdit, PresetRename, PresetSave};
 use columns::ColumnMetadata;
 use field_layout::FieldLayout;
 use now_playing::CurrentTrack;
@@ -172,8 +172,17 @@ pub struct App {
     pub(crate) presets_fetch_started: bool,
     /// The in-progress "save as preset" naming dialog, if any.
     pub(crate) preset_save: Option<PresetSave>,
-    /// The in-progress inline preset edit, if any.
+    /// The in-progress inline preset edit, if any. At most one preset is editable
+    /// at a time: the open sort/display preset, or the currently expanded filter
+    /// preset.
     pub(crate) preset_edit: Option<PresetEdit>,
+    /// Which filter preset card is expanded, if any. Only one expands at a time.
+    pub(crate) expanded_filter_preset: Option<Uuid>,
+    /// The in-progress "rename preset" dialog, if any.
+    pub(crate) preset_rename: Option<PresetRename>,
+    /// Set when a builder section is (re)opened, so the builder focuses the right
+    /// input once. Consumed on the next builder frame.
+    pub(crate) builder_focus: bool,
     /// Scope of the open manage-presets modal, if any.
     pub(crate) manage_presets: Option<ManageScope>,
     pub(crate) current_track: Arc<Mutex<Option<CurrentTrack>>>,
@@ -210,6 +219,9 @@ impl Default for App {
             presets_fetch_started: false,
             preset_save: None,
             preset_edit: None,
+            expanded_filter_preset: None,
+            preset_rename: None,
+            builder_focus: false,
             manage_presets: None,
             current_track: Arc::new(Mutex::new(None)),
             audio: audio::new_player(),
@@ -295,6 +307,7 @@ impl eframe::App for App {
         // Modals float above everything else.
         self.render_delete_confirm(&ctx);
         self.render_preset_save_modal(&ctx);
+        self.render_preset_rename_modal(&ctx);
         self.render_manage_presets_modal(&ctx);
     }
 }

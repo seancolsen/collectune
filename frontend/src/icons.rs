@@ -47,8 +47,10 @@ pub(crate) const REVERT: MaterialIcon = mi::ICON_UNDO;
 pub(crate) const RUN: MaterialIcon = mi::ICON_REFRESH;
 /// Reload a list from the backend.
 pub(crate) const REFRESH: MaterialIcon = mi::ICON_REFRESH;
-/// The query-builder (wrench) toggle, and editing a preset's definition.
-pub(crate) const BUILDER: MaterialIcon = mi::ICON_BUILD;
+/// Expanded disclosure arrow on a collapsible preset card.
+pub(crate) const EXPAND_OPEN: MaterialIcon = mi::ICON_EXPAND_MORE;
+/// Collapsed disclosure arrow on a collapsible preset card.
+pub(crate) const EXPAND_CLOSED: MaterialIcon = mi::ICON_CHEVRON_RIGHT;
 
 // Presets.
 /// A saved preset, shown beside preset entries.

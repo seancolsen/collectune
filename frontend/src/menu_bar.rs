@@ -30,6 +30,8 @@ enum PageMenu {
     /// Switch the query into full-querydown mode (from the Base submenu's
     /// "Full query" item or the "Convert to full query" action).
     ConvertToFull,
+    /// Open the manage-all-presets modal.
+    ManagePresets,
 }
 
 /// A choice from the Base submenu: a specific base table, or full-querydown mode.
@@ -74,6 +76,7 @@ impl App {
         let mut section_menu_anchor = None;
         let mut toggle_full_editor = false;
         let mut convert_to_full = false;
+        let mut manage_presets = false;
         let mut base_choice = None;
         let mut run_now = false;
         let mut save_now = false;
@@ -123,6 +126,7 @@ impl App {
                             ) {
                                 Some(PageMenu::Base(table)) => base_choice = Some(table),
                                 Some(PageMenu::ConvertToFull) => convert_to_full = true,
+                                Some(PageMenu::ManagePresets) => manage_presets = true,
                                 Some(PageMenu::Action(QueryAction::Rename)) => want_rename = true,
                                 Some(PageMenu::Action(QueryAction::Revert)) => want_revert = true,
                                 Some(PageMenu::Action(QueryAction::Duplicate)) => {
@@ -188,12 +192,17 @@ impl App {
             self.organizer.open = !self.organizer.open;
         }
         // The section buttons are toggles: clicking the open one closes the builder.
+        // Opening (or switching to) a section flags the builder to focus its input.
         if let Some(section) = section_clicked {
-            self.builder_section = if self.builder_section == Some(section) {
-                None
+            if self.builder_section == Some(section) {
+                self.builder_section = None;
             } else {
-                Some(section)
-            };
+                self.builder_section = Some(section);
+                self.builder_focus = true;
+            }
+        }
+        if manage_presets {
+            self.manage_presets = Some(crate::builder::ManageScope::All);
         }
         // The "Querydown" button is a toggle for the full-query editor panel.
         if toggle_full_editor {
@@ -321,9 +330,19 @@ fn draw_page_menu_button(
             }
             // Convert-to-full is a no-op once already in full mode, so hide it then.
             if !full_mode
-                && menu_item(ui, icons::QUERYDOWN, "Convert to full query", true, None).clicked()
+                && menu_item(
+                    ui,
+                    icons::QUERYDOWN,
+                    "Convert to raw querydown query",
+                    true,
+                    None,
+                )
+                .clicked()
             {
                 chosen = Some(PageMenu::ConvertToFull);
+            }
+            if menu_item(ui, icons::MANAGE_PRESETS, "Manage presets", true, None).clicked() {
+                chosen = Some(PageMenu::ManagePresets);
             }
             if menu_item(ui, icons::RENAME, "Rename", true, None).clicked() {
                 chosen = Some(PageMenu::Action(QueryAction::Rename));
