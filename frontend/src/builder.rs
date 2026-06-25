@@ -205,16 +205,26 @@ impl App {
                     }
                     ui.add_space(6.0);
                 });
-                // Feed this frame's natural content height back for the next
-                // frame. Use a tolerance so sub-pixel jitter doesn't trigger a
-                // permanent repaint loop (which would peg the CPU).
+                // Feed this frame's natural content height back. The panel's
+                // height for *this* pass was derived from the previous frame's
+                // measurement (egui panels fix their height before rendering and
+                // clip overflow — they don't size to content). When the content
+                // height changes — most visibly when expanding a preset — that
+                // stale height would clip the taller content for one painted
+                // frame, a jarring flash. So rather than `request_repaint` (which
+                // paints this wrong-height pass, then draws a corrected one), we
+                // `request_discard`: it throws this pass's output away *before*
+                // it is painted and re-runs immediately with the corrected
+                // height, so the intermediate frame is never shown. The 0.5px
+                // tolerance limits this to genuine changes, so we never exhaust
+                // egui's multi-pass budget in steady state.
                 let measured = output.content_size.y;
                 if self
                     .builder_content_height
                     .is_none_or(|h| (h - measured).abs() > 0.5)
                 {
                     self.builder_content_height = Some(measured);
-                    ui.ctx().request_repaint();
+                    ui.ctx().request_discard("builder height changed");
                 }
             });
         if let Some(def) = def
