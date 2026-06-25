@@ -20,8 +20,10 @@ use crate::rpc::{self, Preset};
 const PRESET_BG: egui::Color32 = egui::Color32::from_rgb(0xF3, 0xE3, 0xFB);
 
 /// Smallest height the builder panel will shrink to, so an empty/"no query"
-/// state still has a sane size.
-const MIN_BUILDER_HEIGHT: f32 = 80.0;
+/// state still has a sane size. Kept just above a single content line so a
+/// one-line builder doesn't reserve unused vertical space (which would
+/// otherwise eat into the query results area).
+const MIN_BUILDER_HEIGHT: f32 = 40.0;
 /// Vertical margin of the panel's `Frame::side_top_panel` (`symmetric(8, 2)`),
 /// added around the measured content so the panel is exactly tall enough.
 const FRAME_V_MARGIN: f32 = 4.0;
@@ -44,6 +46,11 @@ const TAB_RADIUS: u8 = 6;
 /// Vertical gap between the tab row and the detail panel. The expanded tab's
 /// background is extended down across this gap to bridge into the panel.
 const TAB_GAP: f32 = 6.0;
+/// How far the expanded tab's background extends past the top of the detail
+/// panel. The detail panel is painted in front of this background, so the
+/// overlap can run under the panel's rounded top corners with no gap showing
+/// between the name area and the detail panel.
+const TAB_BG_OVERLAP: f32 = 12.0;
 /// Width of the name field in a preset's detail editor.
 const NAME_FIELD_WIDTH: f32 = 180.0;
 
@@ -625,11 +632,14 @@ impl App {
         if let Some(eid) = expanded_id {
             // Bridge the expanded tab's background down to the detail panel,
             // filling the full row height (so the tab grows with a multiline
-            // input) plus the gap. The +2 tucks under the panel to hide the seam.
+            // input) plus the gap, then extending under the detail panel (which
+            // paints in front) far enough to sit beneath its rounded top corners
+            // so no seam shows. This is purely painted, so it never shifts the
+            // detail panel's position.
             if let Some(trect) = expanded_rect {
                 let bg = egui::Rect::from_min_max(
                     trect.min,
-                    egui::pos2(trect.max.x, row_resp.rect.max.y + TAB_GAP + 2.0),
+                    egui::pos2(trect.max.x, row_resp.rect.max.y + TAB_GAP + TAB_BG_OVERLAP),
                 );
                 ui.painter().set(bg_idx, tab_bg_shape(bg));
             }
@@ -1048,15 +1058,12 @@ fn filter_custom_input(
     run: &mut bool,
 ) -> Option<CustomChoice> {
     let has_text = !custom.trim().is_empty();
-    // The trigger sits inside the input rather than after it, so shrink the
-    // editor's content width by the trigger's footprint to keep the whole input
-    // within the available width.
-    let spacing = ui.spacing().item_spacing.x;
-    let trigger_reserve = if has_text {
-        crate::button::SIZE + spacing
-    } else {
-        0.0
-    };
+    // The trigger sits inside the input (its space is reserved by `with_menu` as
+    // extra right padding), so shrink the editor's content width by exactly the
+    // trigger's footprint — and nothing more — to keep the whole input the same
+    // outer width as the empty (trigger-less) state. Reserving any extra here
+    // would leave a stray gap beside the input.
+    let trigger_reserve = if has_text { crate::button::SIZE } else { 0.0 };
     let w = (ui.available_width() - trigger_reserve).max(40.0);
 
     // With no text there's nothing the menu can act on, so show a plain input.
@@ -1094,8 +1101,11 @@ fn draw_tab(ui: &mut egui::Ui, t: &TabInfo) -> (Option<TabClick>, Option<egui::R
     if t.builtin {
         let mut click = None;
         egui::Frame::new().inner_margin(TAB_PADDING).show(ui, |ui| {
+            ui.style_mut().interaction.selectable_labels = false;
             ui.horizontal(|ui| {
-                ui.label(format!("{}  {}", icons::SHUFFLE.codepoint, t.name));
+                // Preset icon, then the preset's name ("Shuffle"), then the
+                // Reshuffle button on the right.
+                ui.label(format!("{}  {}", icons::PRESET.codepoint, t.name));
                 if ui
                     .button(format!("{}  Reshuffle", icons::SHUFFLE.codepoint))
                     .clicked()
@@ -1107,6 +1117,9 @@ fn draw_tab(ui: &mut egui::Ui, t: &TabInfo) -> (Option<TabClick>, Option<egui::R
         return (click, None);
     }
     let inner = egui::Frame::new().inner_margin(TAB_PADDING).show(ui, |ui| {
+        // The name area is a click target, not text — don't let its labels show
+        // the I-beam cursor or become text-selectable.
+        ui.style_mut().interaction.selectable_labels = false;
         ui.horizontal(|ui| {
             let arrow = if t.expanded {
                 icons::EXPAND_OPEN
@@ -1125,7 +1138,11 @@ fn draw_tab(ui: &mut egui::Ui, t: &TabInfo) -> (Option<TabClick>, Option<egui::R
         });
     });
     let rect = inner.response.rect;
-    let clicked = inner.response.interact(egui::Sense::click()).clicked();
+    let clicked = inner
+        .response
+        .interact(egui::Sense::click())
+        .on_hover_cursor(egui::CursorIcon::Default)
+        .clicked();
     let click = clicked.then_some(TabClick::Toggle(t.id));
     let expanded_rect = t.expanded.then_some(rect);
     (click, expanded_rect)
