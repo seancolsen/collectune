@@ -30,7 +30,7 @@ mod web;
 mod welcome;
 
 use audio::AudioPlayer;
-use builder::{ManageScope, PresetEdit, PresetRename, PresetSave};
+use builder::{PresetEdit, PresetRename, PresetSave};
 use columns::ColumnMetadata;
 use field_layout::FieldLayout;
 use now_playing::CurrentTrack;
@@ -185,8 +185,8 @@ pub struct App {
     /// Set when a builder section is (re)opened, so the builder focuses the right
     /// input once. Consumed on the next builder frame.
     pub(crate) builder_focus: bool,
-    /// Scope of the open manage-presets modal, if any.
-    pub(crate) manage_presets: Option<ManageScope>,
+    /// Whether the manage-presets modal is open.
+    pub(crate) manage_presets: bool,
     pub(crate) current_track: Arc<Mutex<Option<CurrentTrack>>>,
     pub(crate) audio: Box<dyn AudioPlayer>,
     pub(crate) pending_scroll_to_row: Option<usize>,
@@ -224,7 +224,7 @@ impl Default for App {
             expanded_filter_preset: None,
             preset_rename: None,
             builder_focus: false,
-            manage_presets: None,
+            manage_presets: false,
             current_track: Arc::new(Mutex::new(None)),
             audio: audio::new_player(),
             pending_scroll_to_row: None,

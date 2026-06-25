@@ -11,7 +11,7 @@ use crate::button::Button;
 use crate::icons;
 use crate::now_playing::menu_item;
 use crate::page::DELETE_RED;
-use crate::query_def::{BuiltinPreset, FilterParts, QueryDefinition, Section, SectionContent};
+use crate::query_def::{BuiltinPreset, QueryDefinition, Section, SectionContent};
 use crate::rpc::{self, Preset};
 
 /// Background of a preset block.
@@ -57,14 +57,6 @@ pub(crate) struct PresetEdit {
     pub(crate) is_default: bool,
 }
 
-/// Scope of the manage-presets modal: every preset for the current base
-/// table, or just one section's.
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ManageScope {
-    All,
-    Section(Section),
-}
-
 /// A choice from a custom block's inline `⋮` menu.
 enum CustomChoice {
     Clear,
@@ -90,13 +82,50 @@ enum InlineAction {
     UsePreset(Uuid),
 }
 
-/// Options selected from a section's toolbar (gear) options menu.
-enum OptionsChoice {
-    Reset,
-    SaveAsPreset,
-    UsePreset(Uuid),
-    UseShuffle,
-    Manage,
+/// Whether a section's options menu offers independently toggled (checkbox)
+/// entries or mutually exclusive (radio) ones. The filter section can combine
+/// several presets, so it uses checkboxes; sort and display pick exactly one
+/// thing, so they use radio buttons.
+#[derive(Clone, Copy)]
+enum ToggleKind {
+    Checkbox,
+    Radio,
+}
+
+/// A built-in (parameterized) preset offered in a section's options menu.
+/// Currently only Shuffle exists (for sorting the track table), but the menu
+/// renders built-ins as their own group so more can be added later.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum BuiltinKind {
+    Shuffle,
+}
+
+impl BuiltinKind {
+    /// The display label shown on the menu row.
+    fn name(self) -> &'static str {
+        match self {
+            BuiltinKind::Shuffle => "Shuffle",
+        }
+    }
+
+    /// The icon shown on the menu row for this built-in.
+    fn icon(self) -> icons::MaterialIcon {
+        match self {
+            BuiltinKind::Shuffle => icons::SHUFFLE,
+        }
+    }
+}
+
+/// The entry a user clicked in a section's toolbar (gear) options menu. The
+/// caller interprets a click per section: the filter toggles the entry, while
+/// sort/display select it exclusively.
+enum MenuEntry {
+    /// The always-present "Custom …" entry.
+    Custom,
+    /// A built-in preset.
+    Builtin(BuiltinKind),
+    /// A user-defined preset, by id.
+    Preset(Uuid),
 }
 
 impl App {
@@ -284,22 +313,28 @@ impl App {
                 .map(|a| (eid, a));
         }
 
-        // The toolbar (gear) options menu.
-        let addable: Vec<(Uuid, String)> = self
+        // The toolbar (gear) options menu: a flat checkbox list. "Custom filter"
+        // is always checked (and disabled, so it can't be removed); each user
+        // preset's checkbox toggles its membership in the filter. The filter
+        // section has no built-in presets.
+        let preset_rows: Vec<(Uuid, String, bool)> = self
             .presets_for(&def.base, Section::Filter)
             .into_iter()
-            .filter(|(id, _)| !def.filter.presets.contains(id))
+            .map(|(id, name)| {
+                let checked = def.filter.presets.contains(&id);
+                (id, name, checked)
+            })
             .collect();
-        let toolbar = options_menu(trigger, |ui| {
-            let mut choice = None;
-            if menu_item(ui, icons::RESET, "Reset to default", true, None).clicked() {
-                choice = Some(OptionsChoice::Reset);
-            }
-            if let Some(id) = preset_submenu(ui, "Add Preset", &addable) {
-                choice = Some(OptionsChoice::UsePreset(id));
-            }
-            choice
-        });
+        let custom_label = format!("Custom {}", Section::Filter.label().to_lowercase());
+        let menu_choice = section_options_menu(
+            trigger,
+            ToggleKind::Checkbox,
+            &custom_label,
+            true,
+            false,
+            &[],
+            &preset_rows,
+        );
 
         // Apply collected actions.
         match custom_choice {
@@ -341,18 +376,23 @@ impl App {
                 InlineAction::ConvertToCustom | InlineAction::UsePreset(_) => {}
             }
         }
-        match toolbar {
-            Some(OptionsChoice::Reset) => {
-                def.filter = FilterParts::default();
-                self.expanded_filter_preset = None;
-                self.preset_edit = None;
+        match menu_choice {
+            Some(MenuEntry::Preset(id)) => {
+                // Toggle the preset's membership in the filter.
+                if def.filter.presets.contains(&id) {
+                    def.filter.presets.retain(|p| *p != id);
+                    if self.expanded_filter_preset == Some(id) {
+                        self.expanded_filter_preset = None;
+                        self.preset_edit = None;
+                    }
+                } else {
+                    def.filter.presets.push(id);
+                }
                 *run = true;
             }
-            Some(OptionsChoice::UsePreset(id)) => {
-                def.filter.presets.push(id);
-                *run = true;
-            }
-            _ => {}
+            // "Custom filter" is disabled and the filter has no built-ins, so
+            // neither is ever returned.
+            Some(MenuEntry::Custom | MenuEntry::Builtin(_)) | None => {}
         }
         if let Some(definition) = save_as {
             self.preset_save = Some(PresetSave {
@@ -389,8 +429,6 @@ impl App {
         let mut custom_choice = None;
         let mut save_as = None;
         let mut inline = None;
-        // Assigned by every match arm below.
-        let toolbar;
         let mut reshuffle = false;
 
         let content = match section {
@@ -430,43 +468,6 @@ impl App {
                         choice
                     });
                 });
-                toolbar = options_menu(trigger, |ui| {
-                    let mut choice = None;
-                    if show_shuffle
-                        && menu_item(ui, icons::SHUFFLE, "Shuffle", true, None).clicked()
-                    {
-                        choice = Some(OptionsChoice::UseShuffle);
-                    }
-                    if menu_item(ui, icons::RESET, "Reset to default", true, None).clicked() {
-                        choice = Some(OptionsChoice::Reset);
-                    }
-                    if menu_item(
-                        ui,
-                        icons::SAVE,
-                        "Save as preset",
-                        has_text && base_chosen,
-                        None,
-                    )
-                    .clicked()
-                    {
-                        choice = Some(OptionsChoice::SaveAsPreset);
-                    }
-                    if let Some(id) = preset_submenu(ui, "Replace with preset", &available) {
-                        choice = Some(OptionsChoice::UsePreset(id));
-                    }
-                    if menu_item(
-                        ui,
-                        icons::MANAGE_PRESETS,
-                        &format!("Manage {} presets", noun.to_lowercase()),
-                        true,
-                        None,
-                    )
-                    .clicked()
-                    {
-                        choice = Some(OptionsChoice::Manage);
-                    }
-                    choice
-                });
             }
             SectionContent::Preset(id) => {
                 let id = *id;
@@ -495,9 +496,6 @@ impl App {
                         choice
                     })
                     .map(|a| (id, a));
-                toolbar = options_menu(trigger, |ui| {
-                    single_preset_toolbar(ui, show_shuffle, noun, &available)
-                });
             }
             SectionContent::Builtin(builtin) => {
                 // A built-in preset gets its own block. Its name sits beside a
@@ -537,11 +535,37 @@ impl App {
                     });
                     ui.label(egui::RichText::new(builtin.querydown()).monospace());
                 });
-                toolbar = options_menu(trigger, |ui| {
-                    single_preset_toolbar(ui, show_shuffle, noun, &available)
-                });
             }
         }
+
+        // The toolbar (gear) options menu: a flat radio list. The "Custom …" entry
+        // is selected when the section holds custom text; below a separator come any
+        // built-in presets (their own group), then the user-defined presets.
+        // Exactly one entry is selected, matching the section's single content.
+        let custom_selected = matches!(content, SectionContent::Custom(_));
+        let builtins: Vec<(BuiltinKind, bool)> = if show_shuffle {
+            let on = matches!(
+                content,
+                SectionContent::Builtin(BuiltinPreset::Shuffle { .. })
+            );
+            vec![(BuiltinKind::Shuffle, on)]
+        } else {
+            Vec::new()
+        };
+        let preset_rows: Vec<(Uuid, String, bool)> = available
+            .iter()
+            .map(|(id, name)| (*id, name.clone(), *content == SectionContent::Preset(*id)))
+            .collect();
+        let custom_label = format!("Custom {}", section.label().to_lowercase());
+        let menu_choice = section_options_menu(
+            trigger,
+            ToggleKind::Radio,
+            &custom_label,
+            custom_selected,
+            true,
+            &builtins,
+            &preset_rows,
+        );
 
         // Apply collected actions (re-deriving `content` borrows as needed).
         if reshuffle && let SectionContent::Builtin(builtin) = content {
@@ -596,36 +620,46 @@ impl App {
                 InlineAction::MergeIntoCustom => {}
             }
         }
-        match toolbar {
-            Some(OptionsChoice::Reset) => {
-                if matches!(
+        match menu_choice {
+            Some(MenuEntry::Custom) => {
+                // Switch to the custom editor, seeding it with the current
+                // preset's or built-in's resolved Querydown so nothing is lost.
+                // A no-op when already custom; the resolved text is equivalent, so
+                // no re-run is needed.
+                let text = match content {
+                    SectionContent::Custom(_) => None,
+                    SectionContent::Builtin(builtin) => Some(builtin.querydown()),
+                    SectionContent::Preset(id) => Some(
+                        self.presets
+                            .iter()
+                            .find(|p| p.id == *id)
+                            .map(|p| p.definition.clone())
+                            .unwrap_or_default(),
+                    ),
+                };
+                if let Some(text) = text {
+                    *content = SectionContent::Custom(text);
+                    self.preset_edit = None;
+                }
+            }
+            Some(MenuEntry::Builtin(BuiltinKind::Shuffle))
+                if !matches!(
                     content,
-                    SectionContent::Preset(_) | SectionContent::Builtin(_)
-                ) {
-                    *run = true;
-                }
-                *content = SectionContent::default();
-                self.preset_edit = None;
-            }
-            Some(OptionsChoice::SaveAsPreset) => {
-                if let SectionContent::Custom(text) = content {
-                    save_as = Some(text.clone());
-                }
-            }
-            Some(OptionsChoice::UsePreset(id)) => {
-                *content = SectionContent::Preset(id);
-                self.preset_edit = None;
-                *run = true;
-            }
-            Some(OptionsChoice::UseShuffle) => {
+                    SectionContent::Builtin(BuiltinPreset::Shuffle { .. })
+                ) =>
+            {
                 *content = SectionContent::Builtin(BuiltinPreset::shuffle());
                 self.preset_edit = None;
                 *run = true;
             }
-            Some(OptionsChoice::Manage) => {
-                self.manage_presets = Some(ManageScope::Section(section));
+            Some(MenuEntry::Preset(id)) if *content != SectionContent::Preset(id) => {
+                *content = SectionContent::Preset(id);
+                self.preset_edit = None;
+                *run = true;
             }
-            None => {}
+            // The chosen radio is already selected (its guard failed), or nothing
+            // was clicked: nothing to do.
+            Some(_) | None => {}
         }
         if let Some(definition) = save_as {
             self.preset_save = Some(PresetSave {
@@ -954,12 +988,12 @@ impl App {
         self.presets.push(preset);
     }
 
-    /// The manage-presets modal: lists the current base table's presets in the
-    /// requested scope, with per-preset delete.
+    /// The manage-presets modal: lists every preset for the current base table,
+    /// with per-preset delete.
     pub(crate) fn render_manage_presets_modal(&mut self, ctx: &egui::Context) {
-        let Some(scope) = self.manage_presets else {
+        if !self.manage_presets {
             return;
-        };
+        }
         let base_table = self
             .current_page()
             .map_or(String::new(), |p| p.live.definition.base.clone());
@@ -967,10 +1001,6 @@ impl App {
             .presets
             .iter()
             .filter(|p| p.base_table == base_table)
-            .filter(|p| match scope {
-                ManageScope::All => true,
-                ManageScope::Section(section) => p.section == section,
-            })
             .map(|p| (p.id, p.name.clone(), p.section, p.is_default))
             .collect();
 
@@ -978,13 +1008,7 @@ impl App {
         let mut close = false;
         let modal = egui::Modal::new(egui::Id::new("manage_presets")).show(ctx, |ui| {
             ui.set_width(280.0);
-            let heading = match scope {
-                ManageScope::All => "Manage presets".to_string(),
-                ManageScope::Section(section) => {
-                    format!("Manage {} presets", section.noun().to_lowercase())
-                }
-            };
-            ui.heading(heading);
+            ui.heading("Manage presets");
             ui.add_space(8.0);
             if listed.is_empty() {
                 ui.weak("No presets yet.");
@@ -992,9 +1016,7 @@ impl App {
             for (id, name, section, is_default) in &listed {
                 ui.horizontal(|ui| {
                     ui.label(name);
-                    if scope == ManageScope::All {
-                        ui.weak(section.noun().to_lowercase());
-                    }
+                    ui.weak(section.noun().to_lowercase());
                     if *is_default {
                         ui.weak("· default");
                     }
@@ -1020,42 +1042,103 @@ impl App {
             self.delete_preset(id);
         }
         if close || modal.should_close() {
-            self.manage_presets = None;
+            self.manage_presets = false;
         }
     }
 }
 
-/// The sort/display toolbar options menu shared by the preset and built-in
-/// states (the custom state has its own, with "Save as preset"). Returns the
-/// chosen option.
-fn single_preset_toolbar(
+/// Pixel size of the section icon shown on each options-menu row.
+const MENU_ROW_ICON_SIZE: f32 = 16.0;
+
+/// One row of a section's options menu: a native [`egui::Checkbox`] or
+/// [`egui::RadioButton`] (per `kind`) whose label is the section `icon` followed
+/// by `label`. Using egui's own widgets keeps these rows' checkbox/radio styling
+/// consistent with the form checkboxes elsewhere (e.g. "Apply by default").
+/// `checked` is the row's current state; `enabled` gates interaction. Returns the
+/// click response.
+fn toggle_menu_item(
     ui: &mut egui::Ui,
-    show_shuffle: bool,
-    noun: &str,
-    available: &[(Uuid, String)],
-) -> Option<OptionsChoice> {
-    let mut choice = None;
-    if show_shuffle && menu_item(ui, icons::SHUFFLE, "Shuffle", true, None).clicked() {
-        choice = Some(OptionsChoice::UseShuffle);
+    kind: ToggleKind,
+    icon: icons::MaterialIcon,
+    label: &str,
+    checked: bool,
+    enabled: bool,
+) -> egui::Response {
+    let atoms = (
+        egui::RichText::new(icon.codepoint)
+            .family(icons::family())
+            .size(MENU_ROW_ICON_SIZE),
+        egui::RichText::new(label),
+    );
+    match kind {
+        ToggleKind::Checkbox => {
+            let mut checked = checked;
+            ui.add_enabled(enabled, egui::Checkbox::new(&mut checked, atoms))
+        }
+        ToggleKind::Radio => ui.add_enabled(enabled, egui::RadioButton::new(checked, atoms)),
     }
-    if menu_item(ui, icons::RESET, "Reset to default", true, None).clicked() {
-        choice = Some(OptionsChoice::Reset);
-    }
-    if let Some(id) = preset_submenu(ui, "Replace with preset", available) {
-        choice = Some(OptionsChoice::UsePreset(id));
-    }
-    if menu_item(
-        ui,
-        icons::MANAGE_PRESETS,
-        &format!("Manage {} presets", noun.to_lowercase()),
-        true,
-        None,
-    )
-    .clicked()
-    {
-        choice = Some(OptionsChoice::Manage);
-    }
-    choice
+}
+
+/// A small, all-caps category heading inside a section's options menu (the
+/// `text` is already upper-case).
+fn menu_heading(ui: &mut egui::Ui, text: &str) {
+    ui.add_space(2.0);
+    ui.label(egui::RichText::new(text).small().weak());
+}
+
+/// A builder section's toolbar (gear) options menu, shared by Filter, Sort, and
+/// Display. It renders a flat list whose rows each carry a checkbox (`kind` =
+/// [`ToggleKind::Checkbox`]) or radio button ([`ToggleKind::Radio`]): first the
+/// always-present "Custom …" entry, then any built-in presets (under a "BUILT IN
+/// PRESETS" heading), then the user-defined presets (under a "USER DEFINED
+/// PRESETS" heading). Each `(_, checked)` / `(id, name, checked)` carries the
+/// row's current state. Returns the entry the user clicked; clicking any row also
+/// closes the menu.
+fn section_options_menu(
+    trigger: Option<&egui::Response>,
+    kind: ToggleKind,
+    custom_label: &str,
+    custom_checked: bool,
+    custom_enabled: bool,
+    builtins: &[(BuiltinKind, bool)],
+    presets: &[(Uuid, String, bool)],
+) -> Option<MenuEntry> {
+    options_menu(trigger, |ui| {
+        let mut choice = None;
+        if toggle_menu_item(
+            ui,
+            kind,
+            icons::CUSTOM,
+            custom_label,
+            custom_checked,
+            custom_enabled,
+        )
+        .clicked()
+        {
+            choice = Some(MenuEntry::Custom);
+        }
+        if !builtins.is_empty() {
+            ui.separator();
+            menu_heading(ui, "BUILT IN PRESETS");
+            for (builtin, checked) in builtins {
+                if toggle_menu_item(ui, kind, builtin.icon(), builtin.name(), *checked, true)
+                    .clicked()
+                {
+                    choice = Some(MenuEntry::Builtin(*builtin));
+                }
+            }
+        }
+        if !presets.is_empty() {
+            ui.separator();
+            menu_heading(ui, "USER DEFINED PRESETS");
+            for (id, name, checked) in presets {
+                if toggle_menu_item(ui, kind, icons::PRESET, name, *checked, true).clicked() {
+                    choice = Some(MenuEntry::Preset(*id));
+                }
+            }
+        }
+        choice
+    })
 }
 
 /// The custom-filter input with a trailing `⋮` menu (shown only when the input

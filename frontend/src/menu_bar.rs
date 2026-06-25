@@ -202,7 +202,7 @@ impl App {
             }
         }
         if manage_presets {
-            self.manage_presets = Some(crate::builder::ManageScope::All);
+            self.manage_presets = true;
         }
         // The "Querydown" button is a toggle for the full-query editor panel.
         if toggle_full_editor {

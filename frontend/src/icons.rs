@@ -39,9 +39,8 @@ pub(crate) const DELETE: MaterialIcon = mi::ICON_DELETE;
 pub(crate) const CLOSE: MaterialIcon = mi::ICON_CLOSE;
 pub(crate) const CLEAR: MaterialIcon = mi::ICON_BACKSPACE;
 pub(crate) const SAVE: MaterialIcon = mi::ICON_SAVE;
-/// "Reset to default" / revert an in-progress edit.
-pub(crate) const RESET: MaterialIcon = mi::ICON_UNDO;
-/// Revert a saved query's unsaved changes back to its last-saved version.
+/// Revert an in-progress edit, or a saved query's unsaved changes back to its
+/// last-saved version.
 pub(crate) const REVERT: MaterialIcon = mi::ICON_UNDO;
 /// (Re-)run the current query.
 pub(crate) const RUN: MaterialIcon = mi::ICON_REFRESH;
@@ -53,6 +52,10 @@ pub(crate) const EXPAND_OPEN: MaterialIcon = mi::ICON_EXPAND_MORE;
 pub(crate) const EXPAND_CLOSED: MaterialIcon = mi::ICON_CHEVRON_RIGHT;
 
 // Presets.
+/// A hand-written ("custom") query fragment, shown on the "Custom …" rows of the
+/// section options menus. (Material Symbols 0.6 has no `wand_shine`; this
+/// magic-wand glyph is the closest match.)
+pub(crate) const CUSTOM: MaterialIcon = mi::ICON_AUTO_FIX_HIGH;
 /// A saved preset, shown beside preset entries.
 pub(crate) const PRESET: MaterialIcon = mi::ICON_APPROVAL;
 /// The built-in "Shuffle" sorting preset, and its "Reshuffle" action.
