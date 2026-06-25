@@ -1,7 +1,9 @@
 //! The query-builder panel: per-section editors for the filter, sorting, and
-//! display parts of a query. Each section combines hand-written Querydown
-//! fragments ("custom") with saved presets, and the panel also owns the modals
-//! for naming, renaming, and managing presets.
+//! display parts of a query. Each section combines a hand-written Querydown
+//! fragment ("custom") with saved presets. A shared layout (see
+//! [`App::builder_widget`]) lays out an optional custom input beside a row of
+//! right-aligned preset "tabs"; an expanded tab reveals an inline editor below,
+//! connected to the tab like a tabbed interface.
 
 use eframe::egui;
 use uuid::Uuid;
@@ -14,7 +16,7 @@ use crate::page::DELETE_RED;
 use crate::query_def::{BuiltinPreset, QueryDefinition, Section, SectionContent};
 use crate::rpc::{self, Preset};
 
-/// Background of a preset block.
+/// Background of an expanded preset tab and its detail panel.
 const PRESET_BG: egui::Color32 = egui::Color32::from_rgb(0xF3, 0xE3, 0xFB);
 
 /// Smallest height the builder panel will shrink to, so an empty/"no query"
@@ -24,9 +26,26 @@ const MIN_BUILDER_HEIGHT: f32 = 80.0;
 /// added around the measured content so the panel is exactly tall enough.
 const FRAME_V_MARGIN: f32 = 4.0;
 
-/// Minimum width the custom-filter text input must retain beside any collapsed
-/// preset cards. Below this, the cards move to their own row below the input.
+/// Minimum width the custom-filter text input must retain beside any preset
+/// tabs. Below this, the tabs move to their own row below the input.
 const MIN_FILTER_INPUT_WIDTH: f32 = 400.0;
+
+/// Inner padding of a preset tab's name area, chosen so its height matches a
+/// one-line text input (whose padding is the same), keeping a collapsed tab
+/// aligned with an adjacent input.
+const TAB_PADDING: egui::Margin = egui::Margin {
+    left: 7,
+    right: 7,
+    top: 4,
+    bottom: 4,
+};
+/// Corner radius of an expanded tab's (top) corners and the detail panel.
+const TAB_RADIUS: u8 = 6;
+/// Vertical gap between the tab row and the detail panel. The expanded tab's
+/// background is extended down across this gap to bridge into the panel.
+const TAB_GAP: f32 = 6.0;
+/// Width of the name field in a preset's detail editor.
+const NAME_FIELD_WIDTH: f32 = 180.0;
 
 /// The "save as preset" naming dialog: which section is being saved and the
 /// Querydown fragment to store.
@@ -40,18 +59,11 @@ pub(crate) struct PresetSave {
     pub(crate) take_focus: bool,
 }
 
-/// The "rename preset" dialog: the preset being renamed and the in-progress name.
-pub(crate) struct PresetRename {
-    pub(crate) id: Uuid,
-    pub(crate) name: String,
-    /// Set on the first frame so the name field grabs focus once.
-    pub(crate) take_focus: bool,
-}
-
 /// An in-progress edit of a saved preset's definition. The buffers are committed
-/// to the preset (and the backend) on save, or discarded on revert.
+/// to the preset (and the backend) on save, or discarded on revert. These live
+/// keyed by preset id in [`App::preset_edits`], persisting across collapse,
+/// builder close, and query navigation.
 pub(crate) struct PresetEdit {
-    pub(crate) id: Uuid,
     pub(crate) name: String,
     pub(crate) definition: String,
     pub(crate) is_default: bool,
@@ -65,21 +77,28 @@ enum CustomChoice {
     Use(Uuid),
 }
 
-/// An action chosen from a preset (or built-in) block's inline `⋮` menu. Not
-/// every variant applies to every section; the caller handles the relevant ones.
-enum InlineAction {
-    /// Discard in-progress edits, restoring the last-saved definition.
-    Revert,
-    /// Open the rename-preset dialog.
-    Rename,
-    /// Fold the preset's fragment into the custom filter text (filter only).
-    MergeIntoCustom,
-    /// Replace the preset reference with its current definition as custom text.
-    ConvertToCustom,
-    /// Drop the preset (or built-in) from the query.
-    Remove,
-    /// Swap in a different preset.
-    UsePreset(Uuid),
+/// A collapsed preset "tab" (name area) rendered in a builder's tab row.
+struct TabInfo {
+    /// The preset's id (unused for the built-in tab).
+    id: Uuid,
+    /// The name shown in the tab.
+    name: String,
+    /// Whether the preset has unsaved edits (shows the red star marker).
+    dirty: bool,
+    /// Whether the preset is currently expanded (gets the pink background).
+    expanded: bool,
+    /// A built-in (Shuffle) tab: no chevron, never expands, carries a Reshuffle
+    /// button instead of an editor.
+    builtin: bool,
+}
+
+/// What a click in the tab row produced.
+#[derive(Clone, Copy)]
+enum TabClick {
+    /// A user preset's name area was clicked (toggle its expansion).
+    Toggle(Uuid),
+    /// The built-in tab's Reshuffle button was clicked.
+    Reshuffle,
 }
 
 /// Whether a section's options menu offers independently toggled (checkbox)
@@ -202,10 +221,8 @@ impl App {
     }
 
     /// The filter builder: a custom block combined (via AND) with any number of
-    /// presets, the latter shown as collapsible cards beside (or below) the input.
-    // One linear pass over the section's blocks and menus; splitting it up
-    // would just scatter the collected actions.
-    #[allow(clippy::too_many_lines)]
+    /// presets, the latter shown as right-aligned tabs beside (or below) the
+    /// input.
     fn filter_builder_ui(
         &mut self,
         ui: &mut egui::Ui,
@@ -216,102 +233,46 @@ impl App {
         let base_chosen = def.is_runnable();
         let focus = std::mem::take(&mut self.builder_focus);
         let mut custom_choice = None;
+        let mut custom_run = false;
         let mut save_as = None;
-        let mut toggle_expand = None;
-        let mut inline = None;
 
         let presets = def.filter.presets.clone();
         // Drop a stale expansion (e.g. the preset was removed elsewhere).
-        if let Some(eid) = self.expanded_filter_preset
+        if let Some(eid) = self.expanded_preset
             && !presets.contains(&eid)
         {
-            self.expanded_filter_preset = None;
-            self.preset_edit = None;
+            self.expanded_preset = None;
         }
-        let expanded = self.expanded_filter_preset;
-        let expanded_dirty = self.preset_edit_dirty();
+        let expanded = self.expanded_preset;
+        let tabs: Vec<TabInfo> = presets
+            .iter()
+            .map(|id| TabInfo {
+                id: *id,
+                name: self.preset_name(*id),
+                dirty: self.preset_dirty(*id),
+                expanded: expanded == Some(*id),
+                builtin: false,
+            })
+            .collect();
+        let expanded_id = expanded.filter(|e| presets.contains(e));
 
-        if presets.is_empty() {
-            // No presets: the input consumes the full width.
-            ui.horizontal_top(|ui| {
-                custom_choice =
-                    filter_custom_input(ui, &mut def.filter.custom, base_chosen, focus, run, 0.0);
-            });
-        } else {
-            let names: Vec<(Uuid, String)> = presets
-                .iter()
-                .map(|id| (*id, self.preset_name(*id)))
-                .collect();
-            let total_cards: f32 = names
-                .iter()
-                .map(|(_, n)| measure_collapsed_card_width(ui, n))
-                .sum::<f32>()
-                + ui.spacing().item_spacing.x * names.len() as f32;
-            let side_by_side = ui.available_width() - total_cards >= MIN_FILTER_INPUT_WIDTH;
-            if side_by_side {
-                // Input on the left (filling the remainder), cards on the right.
-                ui.horizontal_top(|ui| {
-                    custom_choice = filter_custom_input(
-                        ui,
-                        &mut def.filter.custom,
-                        base_chosen,
-                        focus,
-                        run,
-                        total_cards,
-                    );
-                    for (id, name) in &names {
-                        let dirty = expanded == Some(*id) && expanded_dirty;
-                        if collapsed_filter_card(ui, *id, name, dirty, expanded == Some(*id)) {
-                            toggle_expand = Some(*id);
-                        }
-                    }
-                });
-            } else {
-                // Not enough room: input full-width, cards wrapped below it.
-                ui.horizontal_top(|ui| {
-                    custom_choice = filter_custom_input(
-                        ui,
-                        &mut def.filter.custom,
-                        base_chosen,
-                        focus,
-                        run,
-                        0.0,
-                    );
-                });
-                ui.add_space(6.0);
-                ui.horizontal_wrapped(|ui| {
-                    for (id, name) in &names {
-                        let dirty = expanded == Some(*id) && expanded_dirty;
-                        if collapsed_filter_card(ui, *id, name, dirty, expanded == Some(*id)) {
-                            toggle_expand = Some(*id);
-                        }
-                    }
-                });
-            }
-        }
-
-        // The expanded preset's editor, full width below the row of cards.
-        if let Some(eid) = self.expanded_filter_preset {
-            ui.add_space(6.0);
-            inline = self
-                .preset_editor(ui, eid, None, run, |ui, dirty| {
-                    let mut choice = None;
-                    if menu_item(ui, icons::REVERT, "Revert changes", dirty, None).clicked() {
-                        choice = Some(InlineAction::Revert);
-                    }
-                    if menu_item(ui, icons::RENAME, "Rename preset", true, None).clicked() {
-                        choice = Some(InlineAction::Rename);
-                    }
-                    if menu_item(ui, icons::CONVERT, "Merge into custom", true, None).clicked() {
-                        choice = Some(InlineAction::MergeIntoCustom);
-                    }
-                    if menu_item(ui, icons::CLOSE, "Remove from query", true, None).clicked() {
-                        choice = Some(InlineAction::Remove);
-                    }
-                    choice
-                })
-                .map(|a| (eid, a));
-        }
+        let click = self.builder_widget(
+            ui,
+            true,
+            |ui| {
+                custom_choice = filter_custom_input(
+                    ui,
+                    &mut def.filter.custom,
+                    base_chosen,
+                    focus,
+                    &mut custom_run,
+                );
+            },
+            &tabs,
+            expanded_id,
+            run,
+        );
+        *run |= custom_run;
 
         // The toolbar (gear) options menu: a flat checkbox list. "Custom filter"
         // is always checked (and disabled, so it can't be removed); each user
@@ -340,50 +301,18 @@ impl App {
         match custom_choice {
             Some(CustomChoice::Clear) => def.filter.custom.clear(),
             Some(CustomChoice::Save) => save_as = Some(def.filter.custom.clone()),
-            _ => {}
+            Some(CustomChoice::Use(_)) | None => {}
         }
-        if let Some(id) = toggle_expand {
-            if self.expanded_filter_preset == Some(id) {
-                self.expanded_filter_preset = None;
-                self.preset_edit = None;
-            } else {
-                self.expanded_filter_preset = Some(id);
-                self.begin_preset_edit(id);
-            }
-        }
-        if let Some((id, action)) = inline {
-            match action {
-                InlineAction::Revert => self.begin_preset_edit(id),
-                InlineAction::Rename => self.begin_preset_rename(id),
-                InlineAction::MergeIntoCustom => {
-                    if let Some(preset) = self.presets.iter().find(|p| p.id == id) {
-                        if !def.filter.custom.trim().is_empty() {
-                            def.filter.custom.push('\n');
-                        }
-                        def.filter.custom.push_str(&preset.definition);
-                    }
-                    def.filter.presets.retain(|p| *p != id);
-                    self.expanded_filter_preset = None;
-                    self.preset_edit = None;
-                    *run = true;
-                }
-                InlineAction::Remove => {
-                    def.filter.presets.retain(|p| *p != id);
-                    self.expanded_filter_preset = None;
-                    self.preset_edit = None;
-                    *run = true;
-                }
-                InlineAction::ConvertToCustom | InlineAction::UsePreset(_) => {}
-            }
+        if let Some(TabClick::Toggle(id)) = click {
+            self.toggle_expand(id);
         }
         match menu_choice {
             Some(MenuEntry::Preset(id)) => {
                 // Toggle the preset's membership in the filter.
                 if def.filter.presets.contains(&id) {
                     def.filter.presets.retain(|p| *p != id);
-                    if self.expanded_filter_preset == Some(id) {
-                        self.expanded_filter_preset = None;
-                        self.preset_edit = None;
+                    if self.expanded_preset == Some(id) {
+                        self.expanded_preset = None;
                     }
                 } else {
                     def.filter.presets.push(id);
@@ -406,9 +335,7 @@ impl App {
     }
 
     /// The sort/display builder: the section is either one custom block, one
-    /// (always-expanded, inline-editable) preset, or the built-in Shuffle preset.
-    // One linear pass over the section's blocks and menus; splitting it up
-    // would just scatter the collected actions.
+    /// (collapsible, inline-editable) preset, or the built-in Shuffle preset.
     #[allow(clippy::too_many_lines)]
     fn single_builder_ui(
         &mut self,
@@ -422,14 +349,26 @@ impl App {
         let available = self.presets_for(&def.base, section);
         // The built-in Shuffle preset is offered only for sorting the track table.
         let show_shuffle = section == Section::Sort && def.base.eq_ignore_ascii_case("track");
-        let noun = section.noun();
-        let heading = format!("PRESET {}", noun.to_uppercase());
         let focus = std::mem::take(&mut self.builder_focus);
 
         let mut custom_choice = None;
+        let mut custom_run = false;
         let mut save_as = None;
-        let mut inline = None;
         let mut reshuffle = false;
+
+        // Keep the expansion valid only for the section's current preset.
+        let current_preset = match section {
+            Section::Sort => &def.sort,
+            Section::Display => &def.display,
+            Section::Filter => unreachable!("filter uses filter_builder_ui"),
+        };
+        let preset_id = match current_preset {
+            SectionContent::Preset(id) => Some(*id),
+            _ => None,
+        };
+        if self.expanded_preset.is_some() && self.expanded_preset != preset_id {
+            self.expanded_preset = None;
+        }
 
         let content = match section {
             Section::Sort => &mut def.sort,
@@ -439,104 +378,75 @@ impl App {
 
         match content {
             SectionContent::Custom(text) => {
-                let has_text = !text.trim().is_empty();
                 let inline_presets = available.clone();
-                ui.horizontal_top(|ui| {
-                    let reserve = crate::button::SIZE + ui.spacing().item_spacing.x;
-                    let w = (ui.available_width() - reserve).max(40.0);
-                    code_editor(ui, text, w, focus, run);
-                    custom_choice = dots_menu(ui, |ui| {
-                        let mut choice = None;
-                        if menu_item(ui, icons::CLEAR, "Clear", has_text, None).clicked() {
-                            choice = Some(CustomChoice::Clear);
-                        }
-                        if menu_item(
-                            ui,
-                            icons::SAVE,
-                            "Save as preset",
-                            has_text && base_chosen,
-                            None,
-                        )
-                        .clicked()
-                        {
-                            choice = Some(CustomChoice::Save);
-                        }
-                        if let Some(id) = preset_submenu(ui, "Replace with preset", &inline_presets)
-                        {
-                            choice = Some(CustomChoice::Use(id));
-                        }
-                        choice
-                    });
-                });
+                self.builder_widget(
+                    ui,
+                    true,
+                    |ui| {
+                        let has_text = !text.trim().is_empty();
+                        let reserve = crate::button::SIZE + ui.spacing().item_spacing.x;
+                        let w = (ui.available_width() - reserve).max(40.0);
+                        code_editor(ui, text, w, focus, &mut custom_run);
+                        custom_choice = dots_menu(ui, |ui| {
+                            let mut choice = None;
+                            if menu_item(ui, icons::CLEAR, "Clear", has_text, None).clicked() {
+                                choice = Some(CustomChoice::Clear);
+                            }
+                            if menu_item(
+                                ui,
+                                icons::SAVE,
+                                "Save as preset",
+                                has_text && base_chosen,
+                                None,
+                            )
+                            .clicked()
+                            {
+                                choice = Some(CustomChoice::Save);
+                            }
+                            if let Some(id) =
+                                preset_submenu(ui, "Replace with preset", &inline_presets)
+                            {
+                                choice = Some(CustomChoice::Use(id));
+                            }
+                            choice
+                        });
+                    },
+                    &[],
+                    None,
+                    run,
+                );
             }
             SectionContent::Preset(id) => {
                 let id = *id;
-                let inline_presets = available.clone();
-                inline = self
-                    .preset_editor(ui, id, Some(&heading), run, |ui, dirty| {
-                        let mut choice = None;
-                        if menu_item(ui, icons::REVERT, "Revert changes", dirty, None).clicked() {
-                            choice = Some(InlineAction::Revert);
-                        }
-                        if menu_item(ui, icons::RENAME, "Rename preset", true, None).clicked() {
-                            choice = Some(InlineAction::Rename);
-                        }
-                        if menu_item(ui, icons::CONVERT, "Convert to custom", true, None).clicked()
-                        {
-                            choice = Some(InlineAction::ConvertToCustom);
-                        }
-                        if menu_item(ui, icons::CLOSE, "Remove from query", true, None).clicked() {
-                            choice = Some(InlineAction::Remove);
-                        }
-                        if let Some(pid) =
-                            preset_submenu(ui, "Use a different preset", &inline_presets)
-                        {
-                            choice = Some(InlineAction::UsePreset(pid));
-                        }
-                        choice
-                    })
-                    .map(|a| (id, a));
+                let expanded = self.expanded_preset == Some(id);
+                let tabs = [TabInfo {
+                    id,
+                    name: self.preset_name(id),
+                    dirty: self.preset_dirty(id),
+                    expanded,
+                    builtin: false,
+                }];
+                let expanded_id = expanded.then_some(id);
+                let click = self.builder_widget(ui, false, |_ui| {}, &tabs, expanded_id, run);
+                if let Some(TabClick::Toggle(_)) = click {
+                    self.toggle_expand(id);
+                }
             }
             SectionContent::Builtin(builtin) => {
-                // A built-in preset gets its own block. Its name sits beside a
-                // "Reshuffle" button that regenerates the seed in place, plus an
-                // inline `⋮` menu. The generated Querydown is shown below.
-                let inline_presets = available.clone();
-                section_frame(ui, PRESET_BG, |ui| {
-                    small_heading(ui, &heading);
-                    ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new(builtin.name()).strong());
-                        let label = format!("{}  Reshuffle", icons::SHUFFLE.codepoint);
-                        if ui.button(label).clicked() {
-                            reshuffle = true;
-                        }
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            inline = dots_menu(ui, |ui| {
-                                let mut choice = None;
-                                if menu_item(ui, icons::CONVERT, "Convert to custom", true, None)
-                                    .clicked()
-                                {
-                                    choice = Some(InlineAction::ConvertToCustom);
-                                }
-                                if menu_item(ui, icons::CLOSE, "Remove from query", true, None)
-                                    .clicked()
-                                {
-                                    choice = Some(InlineAction::Remove);
-                                }
-                                if let Some(pid) =
-                                    preset_submenu(ui, "Use a different preset", &inline_presets)
-                                {
-                                    choice = Some(InlineAction::UsePreset(pid));
-                                }
-                                choice
-                            })
-                            .map(|a| (Uuid::nil(), a));
-                        });
-                    });
-                    ui.label(egui::RichText::new(builtin.querydown()).monospace());
-                });
+                let tabs = [TabInfo {
+                    id: Uuid::nil(),
+                    name: builtin.name().to_string(),
+                    dirty: false,
+                    expanded: false,
+                    builtin: true,
+                }];
+                let click = self.builder_widget(ui, false, |_ui| {}, &tabs, None, run);
+                if let Some(TabClick::Reshuffle) = click {
+                    reshuffle = true;
+                }
             }
         }
+        *run |= custom_run;
 
         // The toolbar (gear) options menu: a flat radio list. The "Custom …" entry
         // is selected when the section holds custom text; below a separator come any
@@ -585,40 +495,9 @@ impl App {
             }
             Some(CustomChoice::Use(id)) => {
                 *content = SectionContent::Preset(id);
-                self.preset_edit = None;
                 *run = true;
             }
             None => {}
-        }
-        if let Some((id, action)) = inline {
-            match action {
-                InlineAction::Revert => self.begin_preset_edit(id),
-                InlineAction::Rename => self.begin_preset_rename(id),
-                InlineAction::ConvertToCustom => {
-                    let text = match content {
-                        SectionContent::Builtin(builtin) => builtin.querydown(),
-                        _ => self
-                            .presets
-                            .iter()
-                            .find(|p| p.id == id)
-                            .map(|p| p.definition.clone())
-                            .unwrap_or_default(),
-                    };
-                    *content = SectionContent::Custom(text);
-                    self.preset_edit = None;
-                }
-                InlineAction::Remove => {
-                    *content = SectionContent::default();
-                    self.preset_edit = None;
-                    *run = true;
-                }
-                InlineAction::UsePreset(pid) => {
-                    *content = SectionContent::Preset(pid);
-                    self.preset_edit = None;
-                    *run = true;
-                }
-                InlineAction::MergeIntoCustom => {}
-            }
         }
         match menu_choice {
             Some(MenuEntry::Custom) => {
@@ -639,7 +518,7 @@ impl App {
                 };
                 if let Some(text) = text {
                     *content = SectionContent::Custom(text);
-                    self.preset_edit = None;
+                    self.expanded_preset = None;
                 }
             }
             Some(MenuEntry::Builtin(BuiltinKind::Shuffle))
@@ -649,12 +528,12 @@ impl App {
                 ) =>
             {
                 *content = SectionContent::Builtin(BuiltinPreset::shuffle());
-                self.preset_edit = None;
+                self.expanded_preset = None;
                 *run = true;
             }
             Some(MenuEntry::Preset(id)) if *content != SectionContent::Preset(id) => {
                 *content = SectionContent::Preset(id);
-                self.preset_edit = None;
+                self.expanded_preset = None;
                 *run = true;
             }
             // The chosen radio is already selected (its guard failed), or nothing
@@ -672,53 +551,153 @@ impl App {
         }
     }
 
-    /// Renders the inline editor for the preset `id` (an always-expanded
-    /// sort/display preset, or an expanded filter preset): an editable
-    /// definition, a save button (enabled only while the buffer differs from the
-    /// saved preset), the `⋮` menu (its items supplied by `menu`, which receives
-    /// the dirty flag), and the "Apply by default" checkbox. Saving commits and
-    /// triggers a re-run. Returns the menu's chosen value.
-    fn preset_editor<T>(
+    /// The shared builder layout. Lays out an optional custom input beside a row
+    /// of right-aligned preset `tabs`, wrapping the tabs to their own
+    /// right-aligned row below the input when the input would otherwise get too
+    /// narrow. When a preset is `expanded_id`, its detail editor is drawn full
+    /// width below the row, with the expanded tab's background extended down to
+    /// bridge into it (a tabbed look). `custom` draws the custom input (only when
+    /// `has_custom`). Returns any tab-row click.
+    fn builder_widget(
         &mut self,
         ui: &mut egui::Ui,
-        id: Uuid,
-        header: Option<&str>,
+        has_custom: bool,
+        mut custom: impl FnMut(&mut egui::Ui),
+        tabs: &[TabInfo],
+        expanded_id: Option<Uuid>,
         run: &mut bool,
-        menu: impl FnOnce(&mut egui::Ui, bool) -> Option<T>,
-    ) -> Option<T> {
-        // Seed (or re-seed) the edit buffer when it doesn't already target `id`,
-        // so typing in a stable buffer is never wiped mid-edit.
-        if self.preset_edit.as_ref().is_none_or(|e| e.id != id) {
+    ) -> Option<TabClick> {
+        // Reserve a background shape *before* any content so it paints behind the
+        // tabs and the detail panel; filled in below once the expanded tab's rect
+        // and the row height are known.
+        let bg_idx = ui.painter().add(egui::Shape::Noop);
+
+        let mut click = None;
+        let mut expanded_rect = None;
+
+        let row_resp = if tabs.is_empty() {
+            ui.horizontal_top(|ui| {
+                if has_custom {
+                    custom(ui);
+                }
+            })
+            .response
+        } else {
+            let spacing = ui.spacing().item_spacing.x;
+            let tabs_total: f32 = tabs.iter().map(|t| tab_est_width(ui, t)).sum::<f32>()
+                + spacing * tabs.len() as f32;
+            let side_by_side =
+                !has_custom || ui.available_width() - tabs_total >= MIN_FILTER_INPUT_WIDTH;
+            if side_by_side {
+                // Tabs hug the right edge; the input fills the remaining width on
+                // the left (right-to-left layout, tabs added in reverse so they
+                // read left-to-right).
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
+                    for t in tabs.iter().rev() {
+                        let (c, r) = draw_tab(ui, t);
+                        click = click.or(c);
+                        expanded_rect = expanded_rect.or(r);
+                    }
+                    if has_custom {
+                        custom(ui);
+                    }
+                })
+                .response
+            } else {
+                let top = ui.horizontal_top(|ui| custom(ui)).response;
+                ui.add_space(TAB_GAP);
+                let bottom = ui
+                    .with_layout(
+                        egui::Layout::right_to_left(egui::Align::Min).with_main_wrap(true),
+                        |ui| {
+                            for t in tabs.iter().rev() {
+                                let (c, r) = draw_tab(ui, t);
+                                click = click.or(c);
+                                expanded_rect = expanded_rect.or(r);
+                            }
+                        },
+                    )
+                    .response;
+                top.union(bottom)
+            }
+        };
+
+        if let Some(eid) = expanded_id {
+            // Bridge the expanded tab's background down to the detail panel,
+            // filling the full row height (so the tab grows with a multiline
+            // input) plus the gap. The +2 tucks under the panel to hide the seam.
+            if let Some(trect) = expanded_rect {
+                let bg = egui::Rect::from_min_max(
+                    trect.min,
+                    egui::pos2(trect.max.x, row_resp.rect.max.y + TAB_GAP + 2.0),
+                );
+                ui.painter().set(bg_idx, tab_bg_shape(bg));
+            }
+            ui.add_space(TAB_GAP);
+            self.preset_editor(ui, eid, run);
+        }
+
+        click
+    }
+
+    /// Renders the inline detail editor for the expanded preset `id`: an editable
+    /// name and definition, a revert button (enabled while dirty), a save button
+    /// (enabled while dirty and named), and the "Apply by default" checkbox.
+    /// Saving commits and triggers a re-run; reverting restores the saved version.
+    fn preset_editor(&mut self, ui: &mut egui::Ui, id: Uuid, run: &mut bool) {
+        // Seed the edit buffer the first time this preset is expanded; thereafter
+        // the persisted buffer (in `preset_edits`) is reused so unsaved changes
+        // are never wiped.
+        if !self.preset_edits.contains_key(&id) {
             self.begin_preset_edit(id);
         }
-        let name = self.preset_name(id);
-        let dirty = self.preset_edit_dirty();
-        let mut edit = self.preset_edit.take()?;
-        let mut chosen = None;
+        let dirty = self.preset_dirty(id);
+        let Some(mut edit) = self.preset_edits.remove(&id) else {
+            return;
+        };
         let mut save = false;
+        let mut revert = false;
         section_frame(ui, PRESET_BG, |ui| {
-            if let Some(heading) = header {
-                small_heading(ui, heading);
-                ui.label(egui::RichText::new(&name).strong());
-            }
-            ui.horizontal_top(|ui| {
-                let reserve = (crate::button::SIZE + ui.spacing().item_spacing.x) * 2.0;
-                let w = (ui.available_width() - reserve).max(40.0);
-                sized_multiline(ui, &mut edit.definition, w);
+            ui.horizontal(|ui| {
+                crate::text_input::add(
+                    ui,
+                    egui::TextEdit::singleline(&mut edit.name)
+                        .hint_text("Preset name")
+                        .desired_width(NAME_FIELD_WIDTH),
+                );
+                revert = Button::icon(icons::REVERT)
+                    .enabled(dirty)
+                    .show(ui)
+                    .clicked();
                 save = Button::icon(icons::SAVE)
                     .enabled(dirty && !edit.name.trim().is_empty())
                     .show(ui)
                     .clicked();
-                chosen = dots_menu(ui, |ui| menu(ui, dirty));
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.checkbox(&mut edit.is_default, "Apply by default");
+                });
             });
-            ui.checkbox(&mut edit.is_default, "Apply by default");
+            let w = ui.available_width();
+            sized_multiline(ui, &mut edit.definition, w);
         });
-        self.preset_edit = Some(edit);
+        self.preset_edits.insert(id, edit);
+        if revert {
+            // Re-seed from the saved preset, discarding the in-progress edit.
+            self.begin_preset_edit(id);
+        }
         if save {
-            self.commit_preset_edit();
+            self.commit_preset_edit(id);
             *run = true;
         }
-        chosen
+    }
+
+    /// Toggles the expansion of preset `id` (collapsing any other expanded one).
+    fn toggle_expand(&mut self, id: Uuid) {
+        if self.expanded_preset == Some(id) {
+            self.expanded_preset = None;
+        } else {
+            self.expanded_preset = Some(id);
+        }
     }
 
     /// The display name of a preset, or a placeholder if it no longer exists.
@@ -729,13 +708,13 @@ impl App {
             .map_or_else(|| "(missing preset)".to_string(), |p| p.name.clone())
     }
 
-    /// Whether the in-progress preset edit differs from its saved version (so the
-    /// save button enables and the unsaved marker shows).
-    fn preset_edit_dirty(&self) -> bool {
-        let Some(edit) = &self.preset_edit else {
+    /// Whether the preset `id` has an in-progress edit that differs from its
+    /// saved version (so the save/revert buttons enable and the star shows).
+    fn preset_dirty(&self, id: Uuid) -> bool {
+        let Some(edit) = self.preset_edits.get(&id) else {
             return false;
         };
-        match self.presets.iter().find(|p| p.id == edit.id) {
+        match self.presets.iter().find(|p| p.id == id) {
             Some(p) => {
                 p.name != edit.name
                     || p.definition != edit.definition
@@ -754,38 +733,32 @@ impl App {
             .collect()
     }
 
-    /// Starts an inline edit of a preset, seeding the buffers from its current
-    /// name and definition.
+    /// Starts (or restarts) an inline edit of a preset, seeding the buffer from
+    /// its current name and definition.
     fn begin_preset_edit(&mut self, id: Uuid) {
         if let Some(preset) = self.presets.iter().find(|p| p.id == id) {
-            self.preset_edit = Some(PresetEdit {
+            self.preset_edits.insert(
                 id,
-                name: preset.name.clone(),
-                definition: preset.definition.clone(),
-                is_default: preset.is_default,
-            });
+                PresetEdit {
+                    name: preset.name.clone(),
+                    definition: preset.definition.clone(),
+                    is_default: preset.is_default,
+                },
+            );
         }
     }
 
-    /// Opens the rename dialog for a preset, seeding it with the current name.
-    fn begin_preset_rename(&mut self, id: Uuid) {
-        self.preset_rename = Some(PresetRename {
-            id,
-            name: self.preset_name(id),
-            take_focus: true,
-        });
-    }
-
-    /// Commits the in-progress preset edit locally and to the backend.
-    fn commit_preset_edit(&mut self) {
-        let Some(edit) = self.preset_edit.take() else {
+    /// Commits the in-progress edit of preset `id` locally and to the backend,
+    /// then drops the edit buffer (it now matches the saved preset).
+    fn commit_preset_edit(&mut self, id: Uuid) {
+        let Some(edit) = self.preset_edits.remove(&id) else {
             return;
         };
         let name = edit.name.trim().to_string();
         if name.is_empty() {
             return;
         }
-        if let Some(preset) = self.presets.iter_mut().find(|p| p.id == edit.id) {
+        if let Some(preset) = self.presets.iter_mut().find(|p| p.id == id) {
             preset.name = name;
             preset.definition = edit.definition;
             preset.is_default = edit.is_default;
@@ -797,34 +770,6 @@ impl App {
                 preset.is_default,
                 preset.modified_at,
             );
-        }
-    }
-
-    /// Commits a preset rename locally and to the backend, keeping any active
-    /// edit buffer's name in sync so it doesn't read as freshly unsaved.
-    fn commit_preset_rename(&mut self, state: &PresetRename) {
-        let name = state.name.trim().to_string();
-        if name.is_empty() {
-            return;
-        }
-        let mut committed = false;
-        if let Some(preset) = self.presets.iter_mut().find(|p| p.id == state.id) {
-            preset.name.clone_from(&name);
-            preset.modified_at = rpc::now_epoch();
-            rpc::update_preset(
-                preset.id,
-                &preset.name,
-                &preset.definition,
-                preset.is_default,
-                preset.modified_at,
-            );
-            committed = true;
-        }
-        if committed
-            && let Some(edit) = self.preset_edit.as_mut()
-            && edit.id == state.id
-        {
-            edit.name = name;
         }
     }
 
@@ -844,11 +789,9 @@ impl App {
                 def.display = SectionContent::default();
             }
         }
-        if self.preset_edit.as_ref().is_some_and(|e| e.id == id) {
-            self.preset_edit = None;
-        }
-        if self.expanded_filter_preset == Some(id) {
-            self.expanded_filter_preset = None;
+        self.preset_edits.remove(&id);
+        if self.expanded_preset == Some(id) {
+            self.expanded_preset = None;
         }
     }
 
@@ -902,53 +845,6 @@ impl App {
             }
         } else if cancel {
             self.preset_save = None;
-        }
-    }
-
-    /// The rename dialog shown by a preset block's "Rename preset" menu item.
-    pub(crate) fn render_preset_rename_modal(&mut self, ctx: &egui::Context) {
-        let Some(state) = self.preset_rename.as_mut() else {
-            return;
-        };
-        let mut save = false;
-        let mut cancel = false;
-        let modal = egui::Modal::new(egui::Id::new("preset_rename")).show(ctx, |ui| {
-            ui.set_max_width(280.0);
-            ui.heading("Rename preset");
-            ui.add_space(8.0);
-            let field = crate::text_input::add(
-                ui,
-                egui::TextEdit::singleline(&mut state.name)
-                    .hint_text("Preset name")
-                    .desired_width(f32::INFINITY),
-            );
-            if state.take_focus {
-                field.request_focus();
-                state.take_focus = false;
-            }
-            let name_ok = !state.name.trim().is_empty();
-            if name_ok && field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                save = true;
-            }
-            ui.add_space(12.0);
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.add_enabled(name_ok, egui::Button::new("Save")).clicked() {
-                    save = true;
-                }
-                if ui.button("Cancel").clicked() {
-                    cancel = true;
-                }
-            });
-        });
-        if modal.should_close() {
-            cancel = true;
-        }
-        if save {
-            if let Some(state) = self.preset_rename.take() {
-                self.commit_preset_rename(&state);
-            }
-        } else if cancel {
-            self.preset_rename = None;
         }
     }
 
@@ -1142,18 +1038,17 @@ fn section_options_menu(
 }
 
 /// The custom-filter input with a trailing `⋮` menu (shown only when the input
-/// is non-empty). `reserve_for_cards` is width set aside to the right for any
-/// collapsed preset cards rendered after it. Returns the menu's chosen value.
+/// is non-empty), sized to fill the available width. Returns the menu's chosen
+/// value.
 fn filter_custom_input(
     ui: &mut egui::Ui,
     custom: &mut String,
     base_chosen: bool,
     focus: bool,
     run: &mut bool,
-    reserve_for_cards: f32,
 ) -> Option<CustomChoice> {
     let has_text = !custom.trim().is_empty();
-    // The trigger now sits inside the input rather than after it, so shrink the
+    // The trigger sits inside the input rather than after it, so shrink the
     // editor's content width by the trigger's footprint to keep the whole input
     // within the available width.
     let spacing = ui.spacing().item_spacing.x;
@@ -1162,7 +1057,7 @@ fn filter_custom_input(
     } else {
         0.0
     };
-    let w = (ui.available_width() - reserve_for_cards - trigger_reserve).max(40.0);
+    let w = (ui.available_width() - trigger_reserve).max(40.0);
 
     // With no text there's nothing the menu can act on, so show a plain input.
     if !has_text {
@@ -1188,48 +1083,81 @@ fn filter_custom_input(
         .and_then(|inner| inner.inner)
 }
 
-/// A collapsed filter preset card: a small "PRESET" heading (with an unsaved
-/// marker when `dirty`) above a disclosure arrow and the preset name. The whole
-/// card is clickable; returns `true` when clicked (to toggle its expansion).
-fn collapsed_filter_card(
-    ui: &mut egui::Ui,
-    id: Uuid,
-    name: &str,
-    dirty: bool,
-    expanded: bool,
-) -> bool {
-    ui.push_id(id, |ui| {
-        let inner = egui::Frame::new()
-            .fill(PRESET_BG)
-            .corner_radius(6.0)
-            .inner_margin(egui::Margin::same(8))
-            .show(ui, |ui| {
-                ui.vertical(|ui| {
-                    ui.horizontal(|ui| {
-                        ui.label(
-                            egui::RichText::new(format!("{}  PRESET", icons::PRESET.codepoint))
-                                .small()
-                                .weak(),
-                        );
-                        if dirty {
-                            ui.label(
-                                egui::RichText::new(icons::UNSAVED.codepoint)
-                                    .small()
-                                    .color(DELETE_RED),
-                            );
-                        }
-                    });
-                    let arrow = if expanded {
-                        icons::EXPAND_OPEN
-                    } else {
-                        icons::EXPAND_CLOSED
-                    };
-                    ui.label(format!("{}  {name}", arrow.codepoint));
-                });
+/// Draws a collapsed preset "tab" (its name area). For a user preset this is a
+/// single line — chevron, preset icon, name, and (when dirty) a red star — at
+/// normal font size, padded to a one-line input's height, with no background
+/// (the background is painted by the caller only while expanded). The whole tab
+/// is clickable. For the built-in tab it's the Shuffle name beside a Reshuffle
+/// button, with no chevron and no expansion. Returns any click plus, when this
+/// tab is the expanded one, its rect (so the caller can paint its background).
+fn draw_tab(ui: &mut egui::Ui, t: &TabInfo) -> (Option<TabClick>, Option<egui::Rect>) {
+    if t.builtin {
+        let mut click = None;
+        egui::Frame::new().inner_margin(TAB_PADDING).show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(format!("{}  {}", icons::SHUFFLE.codepoint, t.name));
+                if ui
+                    .button(format!("{}  Reshuffle", icons::SHUFFLE.codepoint))
+                    .clicked()
+                {
+                    click = Some(TabClick::Reshuffle);
+                }
             });
-        inner.response.interact(egui::Sense::click()).clicked()
-    })
-    .inner
+        });
+        return (click, None);
+    }
+    let inner = egui::Frame::new().inner_margin(TAB_PADDING).show(ui, |ui| {
+        ui.horizontal(|ui| {
+            let arrow = if t.expanded {
+                icons::EXPAND_OPEN
+            } else {
+                icons::EXPAND_CLOSED
+            };
+            ui.label(format!(
+                "{}  {}  {}",
+                arrow.codepoint,
+                icons::PRESET.codepoint,
+                t.name
+            ));
+            if t.dirty {
+                ui.label(egui::RichText::new(icons::UNSAVED.codepoint).color(DELETE_RED));
+            }
+        });
+    });
+    let rect = inner.response.rect;
+    let clicked = inner.response.interact(egui::Sense::click()).clicked();
+    let click = clicked.then_some(TabClick::Toggle(t.id));
+    let expanded_rect = t.expanded.then_some(rect);
+    (click, expanded_rect)
+}
+
+/// The background shape for an expanded tab: a pink fill with rounded top corners
+/// (the bottom merges into the detail panel below).
+fn tab_bg_shape(rect: egui::Rect) -> egui::Shape {
+    egui::Shape::rect_filled(
+        rect,
+        egui::CornerRadius {
+            nw: TAB_RADIUS,
+            ne: TAB_RADIUS,
+            sw: 0,
+            se: 0,
+        },
+        PRESET_BG,
+    )
+}
+
+/// An over-estimate of a collapsed preset tab's rendered width, used to decide
+/// whether the tabs fit beside the custom filter input. Slightly generous so the
+/// tabs never overflow the available width.
+fn tab_est_width(ui: &egui::Ui, t: &TabInfo) -> f32 {
+    let body = egui::TextStyle::Body.resolve(ui.style());
+    // The name, plus the chevron and preset icon glyphs with their gaps.
+    let mut w = galley_width(ui, &t.name, body) + 48.0;
+    if t.dirty {
+        w += 18.0;
+    }
+    // + inner margins (7 each side) + a little slack.
+    w + 14.0 + 4.0
 }
 
 /// The full-querydown editor: a single large code editor bound to the query's
@@ -1243,7 +1171,7 @@ fn full_builder_ui(ui: &mut egui::Ui, def: &mut QueryDefinition, run: &mut bool)
     code_editor(ui, text, f32::INFINITY, false, run);
 }
 
-/// A tinted rounded container used for preset blocks.
+/// A tinted rounded container used for the preset detail panel.
 fn section_frame<R>(
     ui: &mut egui::Ui,
     fill: egui::Color32,
@@ -1251,7 +1179,7 @@ fn section_frame<R>(
 ) -> R {
     egui::Frame::new()
         .fill(fill)
-        .corner_radius(6.0)
+        .corner_radius(TAB_RADIUS)
         .inner_margin(egui::Margin::same(8))
         .show(ui, add)
         .inner
@@ -1321,19 +1249,6 @@ fn galley_width(ui: &egui::Ui, text: &str, font: egui::FontId) -> f32 {
         .layout_no_wrap(text.to_owned(), font, egui::Color32::WHITE)
         .size()
         .x
-}
-
-/// An over-estimate of a collapsed preset card's rendered width, used to decide
-/// whether the cards fit beside the custom filter input. Slightly generous so
-/// the cards never overflow the available width.
-fn measure_collapsed_card_width(ui: &egui::Ui, name: &str) -> f32 {
-    let body = egui::TextStyle::Body.resolve(ui.style());
-    let small = egui::TextStyle::Small.resolve(ui.style());
-    // Each content line carries an icon glyph plus a gap (~22px).
-    let heading_line = galley_width(ui, "PRESET", small) + 22.0;
-    let name_line = galley_width(ui, name, body) + 22.0;
-    // + inner margins (8 each side) + a little slack.
-    heading_line.max(name_line) + 16.0 + 4.0
 }
 
 /// A `⋮` button opening a popup menu; returns the menu's chosen value, if any.

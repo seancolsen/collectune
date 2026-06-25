@@ -194,6 +194,10 @@ impl App {
         // The section buttons are toggles: clicking the open one closes the builder.
         // Opening (or switching to) a section flags the builder to focus its input.
         if let Some(section) = section_clicked {
+            // Expansion is ephemeral to the open builder area, so any section
+            // toggle (open, close, or switch) discards it. In-progress edits live
+            // in `preset_edits` and intentionally survive this.
+            self.expanded_preset = None;
             if self.builder_section == Some(section) {
                 self.builder_section = None;
             } else {

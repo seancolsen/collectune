@@ -30,7 +30,7 @@ mod web;
 mod welcome;
 
 use audio::AudioPlayer;
-use builder::{PresetEdit, PresetRename, PresetSave};
+use builder::{PresetEdit, PresetSave};
 use columns::ColumnMetadata;
 use field_layout::FieldLayout;
 use now_playing::CurrentTrack;
@@ -174,14 +174,17 @@ pub struct App {
     pub(crate) presets_fetch_started: bool,
     /// The in-progress "save as preset" naming dialog, if any.
     pub(crate) preset_save: Option<PresetSave>,
-    /// The in-progress inline preset edit, if any. At most one preset is editable
-    /// at a time: the open sort/display preset, or the currently expanded filter
-    /// preset.
-    pub(crate) preset_edit: Option<PresetEdit>,
-    /// Which filter preset card is expanded, if any. Only one expands at a time.
-    pub(crate) expanded_filter_preset: Option<Uuid>,
-    /// The in-progress "rename preset" dialog, if any.
-    pub(crate) preset_rename: Option<PresetRename>,
+    /// In-progress inline edits of presets, keyed by preset id. An entry exists
+    /// once a preset has been expanded for editing, and persists thereafter (even
+    /// when the preset is collapsed, the builder is closed, or the user navigates
+    /// to a different query) so unsaved changes are never silently dropped. A
+    /// preset is "dirty" when its entry differs from the saved preset.
+    pub(crate) preset_edits: HashMap<Uuid, PresetEdit>,
+    /// Which preset is currently expanded for editing in the builder, if any.
+    /// Only one expands at a time. This expanded state is ephemeral to the open
+    /// builder area: it is cleared whenever a builder section is opened, closed,
+    /// or switched.
+    pub(crate) expanded_preset: Option<Uuid>,
     /// Set when a builder section is (re)opened, so the builder focuses the right
     /// input once. Consumed on the next builder frame.
     pub(crate) builder_focus: bool,
@@ -220,9 +223,8 @@ impl Default for App {
             loaded_presets: Arc::new(Mutex::new(None)),
             presets_fetch_started: false,
             preset_save: None,
-            preset_edit: None,
-            expanded_filter_preset: None,
-            preset_rename: None,
+            preset_edits: HashMap::new(),
+            expanded_preset: None,
             builder_focus: false,
             manage_presets: false,
             current_track: Arc::new(Mutex::new(None)),
@@ -309,7 +311,6 @@ impl eframe::App for App {
         // Modals float above everything else.
         self.render_delete_confirm(&ctx);
         self.render_preset_save_modal(&ctx);
-        self.render_preset_rename_modal(&ctx);
         self.render_manage_presets_modal(&ctx);
     }
 }

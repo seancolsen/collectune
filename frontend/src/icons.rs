@@ -62,8 +62,6 @@ pub(crate) const PRESET: MaterialIcon = mi::ICON_APPROVAL;
 pub(crate) const SHUFFLE: MaterialIcon = mi::ICON_SHUFFLE;
 /// Manage the whole preset library ("toolbox").
 pub(crate) const MANAGE_PRESETS: MaterialIcon = mi::ICON_HANDYMAN;
-/// Convert/merge a preset into custom text.
-pub(crate) const CONVERT: MaterialIcon = mi::ICON_SWAP_HORIZ;
 
 // Playback.
 pub(crate) const PLAY: MaterialIcon = mi::ICON_PLAY_ARROW;
