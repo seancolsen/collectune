@@ -1331,3 +1331,232 @@ fn preset_submenu(ui: &mut egui::Ui, label: &str, presets: &[(Uuid, String)]) ->
     });
     inner.and_then(|i| i.inner)
 }
+
+#[cfg(test)]
+mod snapshot_tests {
+    //! Headless snapshot tests for the filter builder, driving the real
+    //! [`App::filter_builder_ui`] (rather than re-implementing the layout) so the
+    //! snapshots track the actual builder code. Each writes one PNG under
+    //! `tests/snapshots/filter_builder/` that the agent eyeballs against the mockup
+    //! and (once correct) commits as a regression baseline. Generate or refresh
+    //! them with `UPDATE_SNAPSHOTS=1 cargo test -p frontend`.
+    //!
+    //! The shared scene is a "vetted" filter preset alongside a custom filter
+    //! input ("jazz playcount:<100"). The variants differ only in the state passed
+    //! to [`Scene`]:
+    //!
+    //! - `preset_expanded` (A): wide, preset expanded for editing, no unsaved edits.
+    //! - `preset_expanded_narrow` (B): (A) at half width — the tab wraps below the
+    //!   input once the input would shrink past `MIN_FILTER_INPUT_WIDTH`.
+    //! - `preset_collapsed` (C): (A) with the preset collapsed (no detail editor).
+    //! - `preset_collapsed_name_hovered` (D): (C) with the tab's name area hovered.
+    //! - `preset_unsaved_default` (E): (A) with "Apply by default" toggled on but
+    //!   not yet saved, so the preset reads as dirty (star + enabled save/revert).
+    //! - `preset_unsaved_rename_narrow` (F): (B) with the name edited to "base" and
+    //!   not yet saved — the unsaved state at a narrow width.
+
+    use std::cell::Cell;
+    use std::collections::HashMap;
+
+    use eframe::egui;
+    use egui_kittest::Harness;
+    use egui_kittest::kittest::Queryable;
+    use uuid::Uuid;
+
+    use super::PresetEdit;
+    use crate::App;
+    use crate::query_def::{FilterParts, QueryDefinition, Section};
+    use crate::rpc::Preset;
+
+    /// Wide container: the preset tab sits beside the custom input.
+    const WIDE: f32 = 660.0;
+    /// Half of [`WIDE`]: too narrow for the tab to fit beside the input, so it
+    /// wraps to its own row below it.
+    const NARROW: f32 = WIDE / 2.0;
+    /// Render at 2× device scale so text is crisp enough to judge spacing by eye.
+    const PPP: f32 = 2.0;
+
+    /// The saved preset's name and definition, shared by every variant.
+    const PRESET_NAME: &str = "vetted";
+    const PRESET_DEF: &str = "rating:>=4 !genre:duplicate file.deletion:@null";
+    const CUSTOM: &str = "jazz playcount:<100";
+
+    /// One filter-builder variant: the knobs that distinguish the snapshots above.
+    struct Scene {
+        /// Container width (`WIDE` or `NARROW`).
+        width: f32,
+        /// Whether the preset's tab starts expanded (its detail editor shown).
+        expanded: bool,
+        /// When set, pre-seeds the preset's in-progress edit buffer to a value that
+        /// differs from the saved preset, putting it in the unsaved (dirty) state.
+        /// `None` leaves the preset clean (the editor seeds the buffer from the
+        /// saved preset on first expansion, so it matches and reads as saved).
+        edit: Option<PresetEdit>,
+        /// Whether to hover the (collapsed) tab's name area before snapshotting.
+        hover_name: bool,
+    }
+
+    /// Renders one [`Scene`] and writes its PNG to `filter_builder/<name>`.
+    fn snapshot(name: &str, scene: Scene) {
+        // A fixed id keeps the buffers wired together; it never appears on screen.
+        let preset_id = Uuid::nil();
+        let preset = Preset {
+            id: preset_id,
+            name: PRESET_NAME.to_owned(),
+            base_table: "track".to_owned(),
+            section: Section::Filter,
+            definition: PRESET_DEF.to_owned(),
+            is_default: false,
+            created_at: 0,
+            modified_at: 0,
+        };
+
+        // An unsaved edit is modeled by pre-seeding the edit buffer; the editor
+        // only seeds it when absent, so this override survives into rendering.
+        let mut preset_edits = HashMap::new();
+        if let Some(edit) = scene.edit {
+            preset_edits.insert(preset_id, edit);
+        }
+
+        let mut app = App {
+            presets: vec![preset],
+            expanded_preset: scene.expanded.then_some(preset_id),
+            preset_edits,
+            ..Default::default()
+        };
+
+        let mut def = QueryDefinition {
+            base: "track".to_owned(),
+            filter: FilterParts {
+                custom: CUSTOM.to_owned(),
+                presets: vec![preset_id],
+            },
+            ..Default::default()
+        };
+
+        // `build_ui` runs the closure once immediately, before we can configure the
+        // context. The builder paints Material Symbols (chevron, preset icon, the
+        // `⋮` trigger, revert/save) that aren't bound until `setup_fonts`, so we
+        // bind fonts on that first frame and skip drawing until the next one (font
+        // changes only take effect on the following frame).
+        let fonts_ready = Cell::new(false);
+
+        let mut harness = Harness::builder()
+            .with_size(egui::vec2(scene.width, 240.0))
+            .with_pixels_per_point(PPP)
+            .build_ui(move |ui| {
+                if !fonts_ready.replace(true) {
+                    // Match the running app: bundled fonts + light visuals, with a
+                    // non-blinking caret so the snapshot is phase-independent.
+                    crate::setup_fonts(ui.ctx());
+                    ui.ctx()
+                        .global_style_mut(|s| s.visuals.text_cursor.blink = false);
+                    return;
+                }
+                // No options trigger (`None`): the toolbar gear that anchors the
+                // section options popup lives in the menu bar, outside this widget,
+                // so that popup isn't part of the state we're capturing.
+                let mut run = false;
+                app.filter_builder_ui(ui, &mut def, None, &mut run);
+            });
+
+        harness.run();
+        if scene.hover_name {
+            // The collapsed tab's name is the only node containing "vetted", so
+            // this aims the pointer at the tab's name area.
+            harness.get_by_label_contains(PRESET_NAME).hover();
+            harness.run();
+        }
+        // Crop tightly to the rendered builder rather than the whole container.
+        harness.fit_contents();
+        harness.snapshot(format!("filter_builder/{name}"));
+    }
+
+    #[test]
+    fn preset_expanded() {
+        snapshot(
+            "preset_expanded",
+            Scene {
+                width: WIDE,
+                expanded: true,
+                edit: None,
+                hover_name: false,
+            },
+        );
+    }
+
+    #[test]
+    fn preset_expanded_narrow() {
+        snapshot(
+            "preset_expanded_narrow",
+            Scene {
+                width: NARROW,
+                expanded: true,
+                edit: None,
+                hover_name: false,
+            },
+        );
+    }
+
+    #[test]
+    fn preset_collapsed() {
+        snapshot(
+            "preset_collapsed",
+            Scene {
+                width: WIDE,
+                expanded: false,
+                edit: None,
+                hover_name: false,
+            },
+        );
+    }
+
+    #[test]
+    fn preset_collapsed_name_hovered() {
+        snapshot(
+            "preset_collapsed_name_hovered",
+            Scene {
+                width: WIDE,
+                expanded: false,
+                edit: None,
+                hover_name: true,
+            },
+        );
+    }
+
+    #[test]
+    fn preset_unsaved_default() {
+        snapshot(
+            "preset_unsaved_default",
+            Scene {
+                width: WIDE,
+                expanded: true,
+                // Only "Apply by default" differs from the saved preset.
+                edit: Some(PresetEdit {
+                    name: PRESET_NAME.to_owned(),
+                    definition: PRESET_DEF.to_owned(),
+                    is_default: true,
+                }),
+                hover_name: false,
+            },
+        );
+    }
+
+    #[test]
+    fn preset_unsaved_rename_narrow() {
+        snapshot(
+            "preset_unsaved_rename_narrow",
+            Scene {
+                width: NARROW,
+                expanded: true,
+                // Only the name differs from the saved preset ("vetted" -> "base").
+                edit: Some(PresetEdit {
+                    name: "base".to_owned(),
+                    definition: PRESET_DEF.to_owned(),
+                    is_default: false,
+                }),
+                hover_name: false,
+            },
+        );
+    }
+}
