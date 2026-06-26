@@ -16,6 +16,11 @@ ARG USER_UID=1000
 ARG USER_GID=1000
 
 # System packages + Node.js 20 (needed for the site and for Claude Code).
+#
+# The mesa-vulkan-drivers / libvulkan1 packages provide lavapipe, a CPU
+# (software) Vulkan implementation. egui_kittest renders widget snapshots
+# through wgpu, which needs a Vulkan adapter; lavapipe supplies one with no GPU
+# and no display server. vulkan-tools is only for the `vulkaninfo` smoke test.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         git \
@@ -24,6 +29,9 @@ RUN apt-get update \
         pkg-config \
         cmake \
         sudo \
+        mesa-vulkan-drivers \
+        libvulkan1 \
+        vulkan-tools \
     && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*

@@ -131,3 +131,151 @@ pub(crate) fn with_menu(
 
     (output, trigger)
 }
+
+#[cfg(test)]
+mod snapshot_tests {
+    //! Headless snapshot tests for [`with_menu`], the Filter builder's
+    //! custom-input widget. Each test renders one state to a PNG under
+    //! `tests/snapshots/text_input_menu/` that the agent eyeballs against the
+    //! mockup and (once correct) commits as a regression baseline. Generate or
+    //! refresh the PNGs with `UPDATE_SNAPSHOTS=1 cargo test -p frontend`.
+    //!
+    //! We always render *with* the trigger (even when the text is empty) to
+    //! isolate the widget itself, rather than reproducing the builder's
+    //! empty-vs-non-empty branching in `filter_custom_input`.
+
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    use eframe::egui;
+    use egui_kittest::Harness;
+
+    use super::{button, with_menu};
+
+    /// Logical width of the test container — wide enough to mirror a real Filter
+    /// section without forcing a wrap until we want one.
+    const CONTAINER_W: f32 = 320.0;
+    /// Render at 2× device scale so text is crisp enough to judge spacing by eye.
+    const PPP: f32 = 2.0;
+
+    /// Where, if anywhere, the pointer hovers for a given case.
+    #[derive(Clone, Copy, PartialEq)]
+    enum Hover {
+        None,
+        Input,
+        Trigger,
+    }
+
+    /// Renders `text` in the given state and writes a snapshot named
+    /// `text_input_menu/<name>`.
+    fn snapshot(name: &str, text: &str, focus: bool, hover: Hover) {
+        let mut buffer = text.to_owned();
+        // Filled each frame so that, after the widget is laid out, we can aim the
+        // pointer at it: (input rect, trigger rect).
+        let rects: Rc<Cell<Option<(egui::Rect, egui::Rect)>>> = Rc::new(Cell::new(None));
+        let rects_in_ui = rects.clone();
+        // `build_ui` runs the closure once immediately, before we can configure
+        // the context. The widget paints the trigger glyph from the
+        // `material-icons` family, which isn't bound until `setup_fonts`, so we
+        // bind fonts on that first frame and skip drawing the widget until the
+        // next one (font changes only take effect on the following frame).
+        let fonts_ready = Cell::new(false);
+
+        let mut harness = Harness::builder()
+            .with_size(egui::vec2(CONTAINER_W, 160.0))
+            .with_pixels_per_point(PPP)
+            .build_ui(move |ui| {
+                if !fonts_ready.replace(true) {
+                    // Match the running app's environment: bundled fonts + light
+                    // visuals. Also stop the text caret blinking so the focused
+                    // snapshot is deterministic rather than depending on phase.
+                    crate::setup_fonts(ui.ctx());
+                    ui.ctx()
+                        .global_style_mut(|s| s.visuals.text_cursor.blink = false);
+                    return;
+                }
+
+                // Mirror `filter_custom_input` + `monospace_edit`: reserve the
+                // trigger's width on the right, then a monospace multiline edit
+                // that auto-grows with its line count.
+                let w = (ui.available_width() - button::SIZE).max(40.0);
+                let rows = buffer.lines().count().max(1);
+                let edit = egui::TextEdit::multiline(&mut buffer)
+                    .desired_width(w)
+                    .desired_rows(rows)
+                    .font(egui::TextStyle::Monospace);
+                let (output, _trigger) = with_menu(ui, edit);
+                if focus {
+                    output.response.request_focus();
+                }
+                // Recompute the trigger rect exactly as `with_menu` does, so we
+                // can aim the pointer at its center for the trigger-hover case.
+                let r = output.response.rect;
+                let side = r.height().min(button::SIZE);
+                let trigger_rect = egui::Rect::from_min_size(
+                    egui::pos2(r.right() - side, r.top()),
+                    egui::vec2(side, side),
+                );
+                rects_in_ui.set(Some((r, trigger_rect)));
+            });
+
+        harness.run();
+        // Crop the snapshot tightly to the widget rather than the whole container.
+        harness.fit_contents();
+
+        if let (true, Some((input_rect, trigger_rect))) = (hover != Hover::None, rects.get()) {
+            let pos = match hover {
+                Hover::Input => input_rect.center(),
+                Hover::Trigger => trigger_rect.center(),
+                Hover::None => unreachable!(),
+            };
+            harness
+                .input_mut()
+                .events
+                .push(egui::Event::PointerMoved(pos));
+            harness.run();
+        }
+
+        harness.snapshot(format!("text_input_menu/{name}"));
+    }
+
+    #[test]
+    fn empty() {
+        snapshot("empty", "", false, Hover::None);
+    }
+
+    #[test]
+    fn focused() {
+        snapshot("focused", "", true, Hover::None);
+    }
+
+    #[test]
+    fn hovered() {
+        snapshot("hovered", "", false, Hover::Input);
+    }
+
+    #[test]
+    fn small_text() {
+        snapshot("small_text", "Lorem ipsum dolor", false, Hover::None);
+    }
+
+    #[test]
+    fn small_text_trigger_hovered() {
+        snapshot(
+            "small_text_trigger_hovered",
+            "Lorem ipsum dolor",
+            false,
+            Hover::Trigger,
+        );
+    }
+
+    #[test]
+    fn wrapping_text() {
+        snapshot(
+            "wrapping_text",
+            "Lorem ipsum dolor sit amet, consectetur adipiscing elit sed do",
+            false,
+            Hover::None,
+        );
+    }
+}

@@ -51,6 +51,32 @@ To jump straight into Claude Code without a separate shell step:
 docker compose run --rm dev claude --dangerously-skip-permissions
 ```
 
+## Visual regression tests (frontend UI)
+
+The frontend has snapshot tests (built on [`egui_kittest`](https://crates.io/crates/egui_kittest)) that render individual widgets headlessly to PNGs under `frontend/tests/snapshots/`. Each rendered image is compared against a committed baseline, so unintended UI changes show up as a test failure with a `*.diff.png` to inspect. Only the `*.png` baselines are committed; the `*.new.png` / `*.diff.png` / `*.old.png` side files are transient and gitignored.
+
+**Run these in the container only.** They render through the container's software Vulkan driver (lavapipe, installed in the `Dockerfile`). Rendering on a host with a different GPU, driver, or font stack produces slightly different pixels and spurious diffs, so the committed baselines are only valid when generated in the container.
+
+From inside the container:
+
+```sh
+# Run the visual regression tests against the committed baselines.
+cargo test -p frontend snapshot_tests
+
+# Approve changes: overwrite the baselines with the freshly rendered images.
+UPDATE_SNAPSHOTS=1 cargo test -p frontend snapshot_tests
+```
+
+From the host (no shell needed — Docker runs the test, writes baselines to the bind-mounted source):
+
+```sh
+# Run the tests.
+docker compose run --rm dev cargo test -p frontend snapshot_tests
+
+# Approve / regenerate the baselines.
+docker compose run --rm -e UPDATE_SNAPSHOTS=1 dev cargo test -p frontend snapshot_tests
+```
+
 ## Optional: VS Code / Codespaces dev container
 
 If you use VS Code, [.devcontainer/devcontainer.json](../.devcontainer/devcontainer.json) lets you run your **whole editor** inside this same container instead of opening a shell with `docker compose run`. It's a supplement — it reuses the exact same `docker-compose.yml` (Dockerfile, cache volumes, UID matching, entrypoint), so nothing about the CLI workflow above changes.

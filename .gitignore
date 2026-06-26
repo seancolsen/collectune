@@ -18,3 +18,12 @@ backend/target/
 # fail before the first trunk build on a fresh checkout.
 /frontend/dist/*
 !/frontend/dist/.gitkeep
+
+# Transient egui_kittest snapshot artifacts, rewritten/cleaned on every test run.
+# Only the `*.png` baselines are committed; these are throwaway:
+#   *.new.png  — the freshly rendered image when a test fails
+#   *.diff.png — a visual diff highlighting the changed pixels
+#   *.old.png  — a backup of the previous baseline after UPDATE_SNAPSHOTS rewrote it
+*.new.png
+*.diff.png
+*.old.png

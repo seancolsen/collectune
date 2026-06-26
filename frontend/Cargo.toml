@@ -14,6 +14,12 @@ path = "src/main.rs"
 [lints]
 workspace = true
 
+# Headless widget snapshot testing (native only). `egui_kittest` renders egui
+# widgets to PNGs via wgpu so UI changes can be eyeballed against mockups and
+# guarded against regressions. Dev-only, so it never enters the WASM bundle.
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+egui_kittest = { version = "0.34", features = ["wgpu", "snapshot"] }
+
 [dependencies]
 arrow-array = "56"
 arrow-buffer = "56"
