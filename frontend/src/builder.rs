@@ -1068,13 +1068,13 @@ fn filter_custom_input(
     run: &mut bool,
 ) -> Option<CustomChoice> {
     let has_text = !custom.trim().is_empty();
-    // The trigger sits inside the input (its space is reserved by `with_menu` as
-    // extra right padding), so shrink the editor's content width by exactly the
-    // trigger's footprint — and nothing more — to keep the whole input the same
-    // outer width as the empty (trigger-less) state. Reserving any extra here
-    // would leave a stray gap beside the input.
-    let trigger_reserve = if has_text { crate::button::SIZE } else { 0.0 };
-    let w = (ui.available_width() - trigger_reserve).max(40.0);
+    // `desired_width` is the editor's *outer* width (egui folds the frame's
+    // margins into it), and `with_menu` reserves the trigger's footprint *inside*
+    // that width via extra right padding — so the full available width gives the
+    // same outer border as the empty (trigger-less) state, with the trigger
+    // tucked inside it. Subtracting the trigger's width here would double-count
+    // that reservation and leave a stray gap to the input's right.
+    let w = ui.available_width().max(40.0);
 
     // With no text there's nothing the menu can act on, so show a plain input.
     if !has_text {

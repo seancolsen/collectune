@@ -195,10 +195,11 @@ mod snapshot_tests {
                     return;
                 }
 
-                // Mirror `filter_custom_input` + `monospace_edit`: reserve the
-                // trigger's width on the right, then a monospace multiline edit
-                // that auto-grows with its line count.
-                let w = (ui.available_width() - button::SIZE).max(40.0);
+                // Mirror `filter_custom_input` + `monospace_edit`: a monospace
+                // multiline edit that fills the available width and auto-grows
+                // with its line count. `with_menu` reserves the trigger's space
+                // inside that width, so we don't subtract it here.
+                let w = ui.available_width().max(40.0);
                 let rows = buffer.lines().count().max(1);
                 let edit = egui::TextEdit::multiline(&mut buffer)
                     .desired_width(w)
