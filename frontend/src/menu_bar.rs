@@ -32,6 +32,8 @@ enum PageMenu {
     ConvertToFull,
     /// Open the manage-all-presets modal.
     ManagePresets,
+    /// Open the "View SQL" modal showing the compiled query SQL.
+    ViewSql,
 }
 
 /// A choice from the Base submenu: a specific base table, or full-querydown mode.
@@ -77,6 +79,7 @@ impl App {
         let mut toggle_full_editor = false;
         let mut convert_to_full = false;
         let mut manage_presets = false;
+        let mut view_sql = false;
         let mut base_choice = None;
         let mut run_now = false;
         let mut save_now = false;
@@ -127,6 +130,7 @@ impl App {
                                 Some(PageMenu::Base(table)) => base_choice = Some(table),
                                 Some(PageMenu::ConvertToFull) => convert_to_full = true,
                                 Some(PageMenu::ManagePresets) => manage_presets = true,
+                                Some(PageMenu::ViewSql) => view_sql = true,
                                 Some(PageMenu::Action(QueryAction::Rename)) => want_rename = true,
                                 Some(PageMenu::Action(QueryAction::Revert)) => want_revert = true,
                                 Some(PageMenu::Action(QueryAction::Duplicate)) => {
@@ -207,6 +211,9 @@ impl App {
         }
         if manage_presets {
             self.manage_presets = true;
+        }
+        if view_sql {
+            self.open_view_sql();
         }
         // The "Querydown" button is a toggle for the full-query editor panel.
         if toggle_full_editor {
@@ -312,8 +319,9 @@ fn draw_page_name(
 }
 
 /// The page's "⋮" options button, opening a menu with the Base-table submenu and
-/// the Rename/Revert/Delete actions. "Revert changes" is shown only when
-/// `show_revert` (a saved query with unsaved edits). Returns the chosen item, if any.
+/// the Rename/Revert/Duplicate/View-SQL/Delete actions. "Revert changes" is shown
+/// only when `show_revert` (a saved query with unsaved edits). Returns the chosen
+/// item, if any.
 fn draw_page_menu_button(
     ui: &mut egui::Ui,
     base_table: &str,
@@ -356,6 +364,9 @@ fn draw_page_menu_button(
             }
             if menu_item(ui, icons::DUPLICATE, "Duplicate", true, None).clicked() {
                 chosen = Some(PageMenu::Action(QueryAction::Duplicate));
+            }
+            if menu_item(ui, icons::VIEW_SQL, "View SQL", true, None).clicked() {
+                chosen = Some(PageMenu::ViewSql);
             }
             if menu_item(ui, icons::DELETE, "Delete", true, Some(DELETE_RED)).clicked() {
                 chosen = Some(PageMenu::Action(QueryAction::Delete));

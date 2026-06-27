@@ -55,6 +55,14 @@ pub(crate) const ORGANIZER_DRAG_FRICTION: f32 = 16.0;
 pub(crate) const ACCENT_BLUE: egui::Color32 = egui::Color32::from_rgb(0xBC, 0xD0, 0xEA);
 pub(crate) const HOVER_BLUE: egui::Color32 = egui::Color32::from_rgb(0x77, 0xA5, 0xCE);
 
+/// Margin kept on each side between the "View SQL" modal and the viewport edges,
+/// so the modal shrinks to fit small windows instead of touching the edges.
+const VIEW_SQL_VIEWPORT_MARGIN: f32 = 24.0;
+/// Height reserved below the "View SQL" modal's scroll area for its footer — the
+/// button row plus the gap above it — so the footer stays pinned just under the
+/// SQL at a constant height while the scroll area absorbs any viewport shrinkage.
+const VIEW_SQL_FOOTER_HEIGHT: f32 = 40.0;
+
 pub fn setup_fonts(ctx: &egui::Context) {
     ctx.set_visuals(egui::Visuals::light());
     let mut fonts = egui::FontDefinitions::default();
@@ -190,6 +198,10 @@ pub struct App {
     pub(crate) builder_focus: bool,
     /// Whether the manage-presets modal is open.
     pub(crate) manage_presets: bool,
+    /// The contents of the "View SQL" modal when open: either the pretty-printed
+    /// SQL the current query would send to the query API, or a compile-error
+    /// message to show in its place. `None` when the modal is closed.
+    pub(crate) view_sql: Option<String>,
     pub(crate) current_track: Arc<Mutex<Option<CurrentTrack>>>,
     pub(crate) audio: Box<dyn AudioPlayer>,
     pub(crate) pending_scroll_to_row: Option<usize>,
@@ -227,6 +239,7 @@ impl Default for App {
             expanded_preset: None,
             builder_focus: false,
             manage_presets: false,
+            view_sql: None,
             current_track: Arc::new(Mutex::new(None)),
             audio: audio::new_player(),
             pending_scroll_to_row: None,
@@ -312,6 +325,7 @@ impl eframe::App for App {
         self.render_delete_confirm(&ctx);
         self.render_preset_save_modal(&ctx);
         self.render_manage_presets_modal(&ctx);
+        self.render_view_sql_modal(&ctx);
     }
 }
 
@@ -665,6 +679,93 @@ impl App {
         }
     }
 
+    /// Compiles the current page's live query into the `DuckDB` SQL that would be
+    /// sent to the query API, returning the SQL or a compile-error message. This
+    /// mirrors the compilation [`run_query`](Self::run_query) performs, but stops
+    /// at the SQL string and runs nothing.
+    fn current_query_sql(&self) -> Result<String, String> {
+        let definition = self
+            .current_page()
+            .map(|p| p.live.definition.clone())
+            .ok_or_else(|| "No query is open.".to_string())?;
+        let schema = self.schema.lock().unwrap();
+        match (definition.assemble(&self.presets), schema.as_deref()) {
+            (Err(e), _) => Err(e),
+            (_, None) => Err("Schema not loaded yet. Please try again in a moment.".to_string()),
+            (Ok(source), Some(schema_json)) => {
+                compile::querydown_to_duckdb(&source, schema_json).map(|c| c.sql)
+            }
+        }
+    }
+
+    /// Opens the "View SQL" modal, populating it with the current query's compiled
+    /// SQL (pretty-formatted) or, if compilation fails, the error message.
+    pub(crate) fn open_view_sql(&mut self) {
+        self.view_sql = Some(match self.current_query_sql() {
+            Ok(sql) => format_sql(&sql),
+            Err(e) => e,
+        });
+    }
+
+    /// Renders the "View SQL" modal when open: a scrollable, selectable view of the
+    /// compiled SQL with a button to copy it to the clipboard. Closing (button,
+    /// backdrop click, or Esc) dismisses it. The modal sizes itself to the viewport
+    /// so it stays usable on small windows.
+    pub(crate) fn render_view_sql_modal(&mut self, ctx: &egui::Context) {
+        let Some(sql) = self.view_sql.as_ref() else {
+            return;
+        };
+        let sql = sql.clone();
+        let mut close = false;
+        // Size the modal to the viewport so it stays usable on small (e.g. mobile)
+        // windows. Width caps at a comfortable reading width but shrinks to fit
+        // narrow screens. Height is bounded by `set_max_height` below so the modal
+        // shrinks to fit short screens; the scroll area then absorbs all of that
+        // shrinkage while the heading and footer keep their natural height.
+        let screen = ctx.content_rect();
+        let width = (screen.width() - 2.0 * VIEW_SQL_VIEWPORT_MARGIN).clamp(120.0, 560.0);
+        let max_height = (screen.height() - 2.0 * VIEW_SQL_VIEWPORT_MARGIN).max(120.0);
+        let modal = egui::Modal::new(egui::Id::new("view_sql")).show(ctx, |ui| {
+            ui.set_width(width);
+            ui.set_max_height(max_height);
+            ui.heading("SQL");
+            ui.add_space(8.0);
+            // Fill the space between the heading and the fixed-height footer with the
+            // scrollable SQL. Deriving its height from the remaining `available_height`
+            // (which already accounts for the heading and the `set_max_height` bound)
+            // keeps the footer pinned just below the SQL and the whole modal inside the
+            // viewport, regardless of the heading's font metrics or the screen size.
+            let scroll_height = (ui.available_height() - VIEW_SQL_FOOTER_HEIGHT).clamp(48.0, 480.0);
+            // Vertical-only scrolling with wrapped text: long SQL lines wrap to the
+            // modal width rather than scrolling sideways (better on small/mobile
+            // viewports), and dropping the horizontal scrollbar lets the scroll area
+            // shrink to the content so the footer hugs the SQL instead of floating
+            // below a reserved scrollbar.
+            egui::ScrollArea::vertical()
+                .max_height(scroll_height)
+                .auto_shrink([false, true])
+                .show(ui, |ui| {
+                    ui.add(
+                        egui::Label::new(egui::RichText::new(&sql).monospace())
+                            .selectable(true)
+                            .wrap_mode(egui::TextWrapMode::Wrap),
+                    );
+                });
+            ui.add_space(12.0);
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.button("Close").clicked() {
+                    close = true;
+                }
+                if ui.button("Copy").clicked() {
+                    ui.ctx().copy_text(sql.clone());
+                }
+            });
+        });
+        if close || modal.should_close() {
+            self.view_sql = None;
+        }
+    }
+
     /// Compiles and runs the current page's live query, replacing its results.
     pub(crate) fn run_query(&mut self, ctx: &egui::Context) {
         let Some((results, definition)) = self
@@ -778,5 +879,110 @@ impl App {
                 rpc::record_play(source_page, now);
             }
         }
+    }
+}
+
+/// Pretty-formats `DuckDB` `sql` for display in the "View SQL" modal, using
+/// `polyglot-sql`. Statements are joined with blank lines (the formatter returns
+/// one per statement). Falls back to the raw SQL if it can't be parsed/formatted,
+/// so the user always sees something they can copy.
+fn format_sql(sql: &str) -> String {
+    match polyglot_sql::format(sql, polyglot_sql::DialectType::DuckDB) {
+        Ok(statements) if !statements.is_empty() => statements.join(";\n\n"),
+        _ => sql.to_owned(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::format_sql;
+
+    #[test]
+    fn format_sql_pretty_prints() {
+        // A single-line query gains line breaks once pretty-formatted.
+        let out = format_sql("select a, b from t where a > 1");
+        assert!(out.contains('\n'), "expected multi-line output, got: {out}");
+        assert!(out.to_uppercase().contains("SELECT"));
+    }
+}
+
+#[cfg(test)]
+mod view_sql_snapshot_tests {
+    //! Snapshot tests for the "View SQL" modal's responsive sizing, driving the
+    //! real [`App::render_view_sql_modal`] so the snapshots track the actual modal
+    //! code. The invariant: the footer (button row) keeps a constant height and
+    //! stays hugging the SQL, while the modal as a whole shrinks to fit short
+    //! viewports. `tall` shows the whole (wrapped) query; `short` shows it clipped
+    //! into a modal squeezed by the viewport. Generate or refresh with
+    //! `UPDATE_SNAPSHOTS=1 cargo test -p frontend`.
+
+    use std::cell::Cell;
+
+    use eframe::egui;
+
+    use crate::App;
+
+    /// A long, wide block of SQL: tall enough to overflow the scroll area and with a
+    /// line long enough to exercise wrapping at a narrow modal width.
+    const SAMPLE_SQL: &str = "\
+WITH \"cte0\" AS (\n  \
+  SELECT\n    \
+    \"credit\".\"track\" AS \"pk\"\n  \
+  FROM \"credit\"\n  \
+  JOIN \"artist\"\n    \
+    ON \"credit\".\"artist\" = \"artist\".\"id\"\n  \
+  WHERE\n    \
+    COALESCE(CONTAINS(LOWER(STRIP_ACCENTS(\"artist\".\"name\")), LOWER(STRIP_ACCENTS('x'))), FALSE)\n  \
+  GROUP BY\n    \
+    \"credit\".\"track\"\n\
+), \"cte1\" AS (\n  \
+  SELECT\n    \
+    \"play\".\"track\" AS \"pk\",\n    \
+    COUNT(*) AS \"v1\"\n  \
+  FROM \"play\"\n  \
+  GROUP BY\n    \
+    \"play\".\"track\"\n\
+)\nSELECT\n  \
+  \"track\".\"id\" AS \"id\",\n  \
+  \"track\".\"title\" AS \"title\"\nFROM \"track\"\n\
+LEFT JOIN \"cte0\" ON \"cte0\".\"pk\" = \"track\".\"id\"\n\
+LEFT JOIN \"cte1\" ON \"cte1\".\"pk\" = \"track\".\"id\"\n\
+ORDER BY\n  \"track\".\"title\"";
+
+    /// Renders the modal at `size` (logical points) into `view_sql_modal/<name>`.
+    fn snapshot(name: &str, size: egui::Vec2) {
+        let mut app = App {
+            view_sql: Some(SAMPLE_SQL.to_owned()),
+            ..Default::default()
+        };
+        // The closure runs once before we can bind fonts; do that on the first frame
+        // and paint the modal from the second (font changes take effect the following
+        // frame), mirroring the filter-builder snapshots. The modal is a `ctx`-level
+        // floating area, so we drive it via `ui.ctx()` rather than the passed `ui`.
+        let fonts_ready = Cell::new(false);
+        let mut harness = egui_kittest::Harness::builder()
+            .with_size(size)
+            .with_pixels_per_point(2.0)
+            .build_ui(move |ui| {
+                if !fonts_ready.replace(true) {
+                    crate::setup_fonts(ui.ctx());
+                    return;
+                }
+                app.render_view_sql_modal(ui.ctx());
+            });
+        harness.run();
+        harness.snapshot(format!("view_sql_modal/{name}"));
+    }
+
+    #[test]
+    fn tall() {
+        // Tall enough that the whole (wrapped) query fits: the footer hugs the SQL.
+        snapshot("tall", egui::vec2(480.0, 620.0));
+    }
+
+    #[test]
+    fn short() {
+        // Short viewport: the modal shrinks, the SQL clips, the footer stays put.
+        snapshot("short", egui::vec2(480.0, 260.0));
     }
 }

@@ -35,6 +35,8 @@ pub(crate) const EDIT: MaterialIcon = mi::ICON_EDIT;
 /// Duplicate a query into a new copy.
 pub(crate) const DUPLICATE: MaterialIcon = mi::ICON_CONTENT_COPY;
 pub(crate) const DELETE: MaterialIcon = mi::ICON_DELETE;
+/// View the compiled SQL that a query would send to the query API.
+pub(crate) const VIEW_SQL: MaterialIcon = mi::ICON_MANUFACTURING;
 /// Remove an item, or close the now-playing bar.
 pub(crate) const CLOSE: MaterialIcon = mi::ICON_CLOSE;
 pub(crate) const CLEAR: MaterialIcon = mi::ICON_BACKSPACE;
