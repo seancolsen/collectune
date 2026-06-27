@@ -765,6 +765,26 @@ impl App {
         }
     }
 
+    /// The preset list as it should be used for *running* (or previewing) a
+    /// query: each saved preset is overlaid with any in-progress, unsaved edit
+    /// from [`App::preset_edits`]. This lets the user refresh query results
+    /// against their pending preset changes before committing them. Presets
+    /// without an open edit pass through unchanged.
+    pub(crate) fn effective_presets(&self) -> Vec<Preset> {
+        self.presets
+            .iter()
+            .map(|p| match self.preset_edits.get(&p.id) {
+                Some(edit) => Preset {
+                    name: edit.name.clone(),
+                    definition: edit.definition.clone(),
+                    is_default: edit.is_default,
+                    ..p.clone()
+                },
+                None => p.clone(),
+            })
+            .collect()
+    }
+
     /// Saved presets matching a base table and section, as `(id, name)`.
     fn presets_for(&self, base_table: &str, section: Section) -> Vec<(Uuid, String)> {
         self.presets

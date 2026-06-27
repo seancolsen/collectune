@@ -688,8 +688,9 @@ impl App {
             .current_page()
             .map(|p| p.live.definition.clone())
             .ok_or_else(|| "No query is open.".to_string())?;
+        let presets = self.effective_presets();
         let schema = self.schema.lock().unwrap();
-        match (definition.assemble(&self.presets), schema.as_deref()) {
+        match (definition.assemble(&presets), schema.as_deref()) {
             (Err(e), _) => Err(e),
             (_, None) => Err("Schema not loaded yet. Please try again in a moment.".to_string()),
             (Ok(source), Some(schema_json)) => {
@@ -795,9 +796,10 @@ impl App {
 
         // Resolve the four query parts into per-section Querydown source, then
         // compile it into DuckDB SQL before running it.
+        let presets = self.effective_presets();
         let compiled = {
             let schema = self.schema.lock().unwrap();
-            match (definition.assemble(&self.presets), schema.as_deref()) {
+            match (definition.assemble(&presets), schema.as_deref()) {
                 (Err(e), _) => Err(e),
                 (_, None) => {
                     Err("Schema not loaded yet. Please try again in a moment.".to_string())
