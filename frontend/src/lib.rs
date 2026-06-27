@@ -198,6 +198,11 @@ pub struct App {
     pub(crate) builder_focus: bool,
     /// Whether the manage-presets modal is open.
     pub(crate) manage_presets: bool,
+    /// Which preset is expanded for inline editing in the manage-presets modal,
+    /// if any. Only one expands at a time. Independent of [`App::expanded_preset`]
+    /// (the builder's expansion) so the two don't fight while the modal floats
+    /// above the builder.
+    pub(crate) manage_expanded: Option<Uuid>,
     /// The contents of the "View SQL" modal when open: either the pretty-printed
     /// SQL the current query would send to the query API, or a compile-error
     /// message to show in its place. `None` when the modal is closed.
@@ -239,6 +244,7 @@ impl Default for App {
             expanded_preset: None,
             builder_focus: false,
             manage_presets: false,
+            manage_expanded: None,
             view_sql: None,
             current_track: Arc::new(Mutex::new(None)),
             audio: audio::new_player(),

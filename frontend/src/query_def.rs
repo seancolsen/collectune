@@ -153,6 +153,15 @@ impl QueryDefinition {
         self.full.is_some()
     }
 
+    /// Whether this definition references the preset `id` in any section (the
+    /// filter's preset list, or the sort/display single-preset content). Used to
+    /// count how many queries depend on a preset.
+    pub(crate) fn references_preset(&self, id: Uuid) -> bool {
+        self.filter.presets.contains(&id)
+            || self.sort == SectionContent::Preset(id)
+            || self.display == SectionContent::Preset(id)
+    }
+
     /// Whether there is enough here to compile: in full mode, non-empty query
     /// text; otherwise a base table has been chosen.
     pub(crate) fn is_runnable(&self) -> bool {

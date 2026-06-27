@@ -854,6 +854,63 @@ impl App {
         if self.expanded_preset == Some(id) {
             self.expanded_preset = None;
         }
+        if self.manage_expanded == Some(id) {
+            self.manage_expanded = None;
+        }
+    }
+
+    /// How many open queries reference the preset `id` in any section. Shown in
+    /// the manage-presets modal so the user can gauge a preset's reach before
+    /// editing or deleting it.
+    fn preset_usage_count(&self, id: Uuid) -> usize {
+        self.pages
+            .iter()
+            .filter(|p| p.live.definition.references_preset(id))
+            .count()
+    }
+
+    /// Creates a blank preset for `section` on `base_table`, persists it, and
+    /// returns its id so the caller can expand it for editing. Seeded with a
+    /// sensible default name so it's immediately valid; the user renames it in the
+    /// inline editor.
+    fn create_blank_preset(&mut self, section: Section, base_table: String) -> Uuid {
+        let now = rpc::now_epoch();
+        let preset = Preset {
+            id: Uuid::new_v4(),
+            name: format!("New {} preset", section.noun().to_lowercase()),
+            base_table,
+            section,
+            definition: String::new(),
+            is_default: false,
+            created_at: now,
+            modified_at: now,
+        };
+        let id = preset.id;
+        rpc::add_preset(&preset);
+        self.presets.push(preset);
+        id
+    }
+
+    /// Duplicates the preset `id` into a new preset (name suffixed " copy",
+    /// never a default), persists it, and returns the new id. The copy is a
+    /// standalone preset: no query references it until one is pointed at it.
+    fn duplicate_preset(&mut self, id: Uuid) -> Option<Uuid> {
+        let source = self.presets.iter().find(|p| p.id == id)?;
+        let now = rpc::now_epoch();
+        let preset = Preset {
+            id: Uuid::new_v4(),
+            name: format!("{} copy", source.name),
+            base_table: source.base_table.clone(),
+            section: source.section,
+            definition: source.definition.clone(),
+            is_default: false,
+            created_at: now,
+            modified_at: now,
+        };
+        let new_id = preset.id;
+        rpc::add_preset(&preset);
+        self.presets.push(preset);
+        Some(new_id)
     }
 
     /// The naming dialog shown by "Save as preset". Confirming creates the
@@ -945,8 +1002,13 @@ impl App {
         self.presets.push(preset);
     }
 
-    /// The manage-presets modal: lists every preset for the current base table,
-    /// with per-preset delete.
+    // (manage-presets row rendering lives in free functions below.)
+
+    /// The manage-presets modal: lists every preset for the current base table.
+    /// Each row shows the preset's section, default flag, and how many queries
+    /// use it, and can be expanded into the inline editor (the same one the
+    /// builder uses) to rename/edit it. Rows also offer duplicate and delete, and
+    /// a "New preset" button creates one from scratch.
     pub(crate) fn render_manage_presets_modal(&mut self, ctx: &egui::Context) {
         if !self.manage_presets {
             return;
@@ -954,40 +1016,71 @@ impl App {
         let base_table = self
             .current_page()
             .map_or(String::new(), |p| p.live.definition.base.clone());
-        let listed: Vec<(Uuid, String, Section, bool)> = self
+        let base_chosen = !base_table.trim().is_empty();
+        // Snapshot per-preset display data up front so the render closure can
+        // borrow `self` mutably for the inline editor without re-borrowing the
+        // preset list. (Usage/dirty/expanded are derived in a second pass, once
+        // the immutable borrow of `self.presets` from the first has ended.)
+        let basics: Vec<(Uuid, String, Section, bool)> = self
             .presets
             .iter()
             .filter(|p| p.base_table == base_table)
             .map(|p| (p.id, p.name.clone(), p.section, p.is_default))
             .collect();
+        let rows: Vec<ManageRow> = basics
+            .into_iter()
+            .map(|(id, name, section, is_default)| ManageRow {
+                id,
+                name,
+                section,
+                is_default,
+                usage: self.preset_usage_count(id),
+                dirty: self.preset_dirty(id),
+                expanded: self.manage_expanded == Some(id),
+            })
+            .collect();
 
+        let mut toggle = None;
         let mut delete = None;
+        let mut duplicate = None;
+        let mut new_section = None;
+        let mut run = false;
         let mut close = false;
         let modal = egui::Modal::new(egui::Id::new("manage_presets")).show(ctx, |ui| {
-            ui.set_width(280.0);
+            ui.set_width(440.0);
             ui.heading("Manage presets");
+            if base_chosen {
+                ui.weak(format!("for the {base_table} table"));
+            }
             ui.add_space(8.0);
-            if listed.is_empty() {
+            if rows.is_empty() {
                 ui.weak("No presets yet.");
             }
-            for (id, name, section, is_default) in &listed {
-                ui.horizontal(|ui| {
-                    ui.label(name);
-                    ui.weak(section.noun().to_lowercase());
-                    if *is_default {
-                        ui.weak("· default");
-                    }
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if Button::icon(icons::DELETE)
-                            .tint(DELETE_RED)
-                            .show(ui)
-                            .clicked()
-                        {
-                            delete = Some(*id);
-                        }
-                    });
-                });
+            for row in &rows {
+                match manage_preset_row(ui, row) {
+                    Some(ManageAction::Toggle) => toggle = Some(row.id),
+                    Some(ManageAction::Delete) => delete = Some(row.id),
+                    Some(ManageAction::Duplicate) => duplicate = Some(row.id),
+                    None => {}
+                }
+                if row.expanded {
+                    self.preset_editor(ui, row.id, &mut run);
+                }
+                ui.add_space(4.0);
             }
+            ui.add_space(8.0);
+            let add = ui.add_enabled(
+                base_chosen,
+                egui::Button::new(format!("{}  New preset", icons::ADD.codepoint)),
+            );
+            egui::Popup::menu(&add).show(|ui| {
+                ui.set_width(160.0);
+                for section in [Section::Filter, Section::Sort, Section::Display] {
+                    if menu_item(ui, section_icon(section), section.noun(), true, None).clicked() {
+                        new_section = Some(section);
+                    }
+                }
+            });
             ui.add_space(12.0);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui.button("Close").clicked() {
@@ -995,13 +1088,121 @@ impl App {
                 }
             });
         });
+
+        if let Some(id) = toggle {
+            self.manage_expanded = (self.manage_expanded != Some(id)).then_some(id);
+        }
         if let Some(id) = delete {
             self.delete_preset(id);
+        }
+        if let Some(id) = duplicate {
+            self.manage_expanded = self.duplicate_preset(id);
+        }
+        if let Some(section) = new_section {
+            self.manage_expanded = Some(self.create_blank_preset(section, base_table));
+        }
+        if run {
+            self.run_query(ctx);
         }
         if close || modal.should_close() {
             self.manage_presets = false;
         }
     }
+}
+
+/// Per-preset display data for one row of the manage-presets modal, snapshotted
+/// before the modal's render closure so it can borrow `App` mutably for the
+/// inline editor.
+struct ManageRow {
+    id: Uuid,
+    name: String,
+    section: Section,
+    is_default: bool,
+    /// How many open queries reference this preset.
+    usage: usize,
+    /// Whether the preset has unsaved inline edits (shows the red star marker).
+    dirty: bool,
+    /// Whether this row's inline editor is open.
+    expanded: bool,
+}
+
+/// What a click on a manage-presets row produced.
+enum ManageAction {
+    /// The name/header area was clicked (expand or collapse the editor).
+    Toggle,
+    Delete,
+    Duplicate,
+}
+
+/// The section icon used on a "New preset" menu row.
+fn section_icon(section: Section) -> icons::MaterialIcon {
+    match section {
+        Section::Filter => icons::FILTER,
+        Section::Sort => icons::SORT,
+        Section::Display => icons::DISPLAY,
+    }
+}
+
+/// A human label for a preset's usage count ("1 query" / "N queries").
+fn usage_label(n: usize) -> String {
+    if n == 1 {
+        "1 query".to_string()
+    } else {
+        format!("{n} queries")
+    }
+}
+
+/// Renders one manage-presets row: a clickable header (disclosure chevron, preset
+/// icon, name, and — while dirty — the unsaved star) on the left, with the
+/// section, default flag, and usage count plus the duplicate and delete buttons
+/// right-aligned. Returns the action the user took, if any.
+fn manage_preset_row(ui: &mut egui::Ui, row: &ManageRow) -> Option<ManageAction> {
+    let mut action = None;
+    ui.horizontal(|ui| {
+        ui.style_mut().interaction.selectable_labels = false;
+        let arrow = if row.expanded {
+            icons::EXPAND_OPEN
+        } else {
+            icons::EXPAND_CLOSED
+        };
+        // The chevron + preset icon + name read as one click target that toggles
+        // the inline editor.
+        let header = ui.add(
+            egui::Label::new(format!(
+                "{} {}  {}",
+                arrow.codepoint,
+                icons::PRESET.codepoint,
+                row.name
+            ))
+            .sense(egui::Sense::click()),
+        );
+        if header.clicked() {
+            action = Some(ManageAction::Toggle);
+        }
+        if row.dirty {
+            ui.label(egui::RichText::new(icons::UNSAVED.codepoint).color(DELETE_RED));
+        }
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if Button::icon(icons::DELETE)
+                .tint(DELETE_RED)
+                .show(ui)
+                .clicked()
+            {
+                action = Some(ManageAction::Delete);
+            }
+            if Button::icon(icons::DUPLICATE).show(ui).clicked() {
+                action = Some(ManageAction::Duplicate);
+            }
+            let mut meta = row.section.noun().to_lowercase();
+            if row.is_default {
+                meta.push_str(" · default");
+            }
+            meta.push_str(" · ");
+            meta.push_str(&usage_label(row.usage));
+            ui.weak(meta);
+        });
+    });
+    action
 }
 
 /// Pixel size of the section icon shown on each options-menu row.
@@ -1613,6 +1814,214 @@ mod snapshot_tests {
                 }),
                 hover_name: false,
             },
+        );
+    }
+}
+
+#[cfg(test)]
+mod manage_presets_snapshot_tests {
+    //! Headless snapshot tests for the manage-presets modal, driving the real
+    //! [`App::render_manage_presets_modal`] so the snapshots track the actual
+    //! modal code. Each writes one PNG under `tests/snapshots/manage_presets/`.
+    //! Generate or refresh with `UPDATE_SNAPSHOTS=1 cargo test -p frontend`.
+    //!
+    //! The shared scene is three "track" presets — a default filter preset, a
+    //! sort preset, and a display preset — each showing how many of the loaded
+    //! queries use it. The variants differ in expansion/edit state:
+    //!
+    //! - `manage_collapsed`: the plain list, nothing expanded.
+    //! - `manage_expanded`: the filter preset expanded into the inline editor.
+    //! - `manage_expanded_dirty`: the filter preset expanded with unsaved edits
+    //!   (renamed), so it reads as dirty (star + enabled save/revert).
+    //! - `manage_empty`: no presets yet (the empty state + enabled "New preset").
+
+    use std::cell::Cell;
+    use std::collections::HashMap;
+
+    use eframe::egui;
+    use egui_kittest::Harness;
+    use uuid::Uuid;
+
+    use super::PresetEdit;
+    use crate::App;
+    use crate::page::QueryPage;
+    use crate::query_def::{FilterParts, QueryDefinition, Section, SectionContent};
+    use crate::rpc::{Preset, Query};
+
+    /// Render at 2× device scale so text is crisp enough to judge spacing by eye.
+    const PPP: f32 = 2.0;
+
+    const FILTER_ID: Uuid = Uuid::from_u128(1);
+    const SORT_ID: Uuid = Uuid::from_u128(2);
+    const DISPLAY_ID: Uuid = Uuid::from_u128(3);
+
+    /// A preset with the test defaults filled in.
+    fn preset(
+        id: Uuid,
+        name: &str,
+        section: Section,
+        definition: &str,
+        is_default: bool,
+    ) -> Preset {
+        Preset {
+            id,
+            name: name.to_owned(),
+            base_table: "track".to_owned(),
+            section,
+            definition: definition.to_owned(),
+            is_default,
+            created_at: 0,
+            modified_at: 0,
+        }
+    }
+
+    /// A persisted query page with the given definition (its id is irrelevant
+    /// except for the current page, supplied explicitly).
+    fn page(id: Uuid, def: QueryDefinition) -> QueryPage {
+        QueryPage::persisted(Query {
+            id,
+            name: "query".to_owned(),
+            created_at: 0,
+            modified_at: 0,
+            last_play: 0,
+            definition: def,
+        })
+    }
+
+    /// A filter-only definition referencing `presets`.
+    fn filter_def(presets: Vec<Uuid>) -> QueryDefinition {
+        QueryDefinition {
+            base: "track".to_owned(),
+            filter: FilterParts {
+                custom: String::new(),
+                presets,
+            },
+            ..Default::default()
+        }
+    }
+
+    /// Builds an [`App`] showing the modal: the three presets (unless `empty`),
+    /// a spread of queries that reference them (so usage counts differ), and the
+    /// requested expansion/edit state.
+    fn make_app(empty: bool, expanded: Option<Uuid>, edit: Option<(Uuid, PresetEdit)>) -> App {
+        let presets = if empty {
+            Vec::new()
+        } else {
+            vec![
+                preset(FILTER_ID, "vetted", Section::Filter, "rating:>=4", true),
+                preset(
+                    SORT_ID,
+                    "by rating",
+                    Section::Sort,
+                    "\\\\rating:desc",
+                    false,
+                ),
+                preset(
+                    DISPLAY_ID,
+                    "compact",
+                    Section::Display,
+                    "$title $artist",
+                    false,
+                ),
+            ]
+        };
+
+        // The current page anchors the modal's base table ("track"); it and two
+        // more queries reference presets so usage reads: vetted 3, by rating 1,
+        // compact 0.
+        let current_id = Uuid::from_u128(100);
+        let mut current = filter_def(vec![FILTER_ID]);
+        current.sort = SectionContent::Preset(SORT_ID);
+        let pages = vec![
+            page(current_id, current),
+            page(Uuid::from_u128(101), filter_def(vec![FILTER_ID])),
+            page(Uuid::from_u128(102), filter_def(vec![FILTER_ID])),
+        ];
+
+        let mut preset_edits = HashMap::new();
+        if let Some((id, e)) = edit {
+            preset_edits.insert(id, e);
+        }
+
+        App {
+            presets,
+            pages,
+            current: crate::page::CurrentPage::Query(current_id),
+            manage_presets: true,
+            manage_expanded: expanded,
+            preset_edits,
+            ..Default::default()
+        }
+    }
+
+    /// Renders the modal in `app` and writes its PNG to `manage_presets/<name>`.
+    fn snapshot(name: &str, size: egui::Vec2, mut app: App) {
+        // `build_ui` runs the closure once immediately, before fonts are bound;
+        // bind them on that first frame and skip drawing until the next (font
+        // changes only take effect on the following frame).
+        let fonts_ready = Cell::new(false);
+        let mut harness = Harness::builder()
+            .with_size(size)
+            .with_pixels_per_point(PPP)
+            .build_ui(move |ui| {
+                if !fonts_ready.replace(true) {
+                    crate::setup_fonts(ui.ctx());
+                    ui.ctx()
+                        .global_style_mut(|s| s.visuals.text_cursor.blink = false);
+                    return;
+                }
+                let ctx = ui.ctx().clone();
+                app.render_manage_presets_modal(&ctx);
+            });
+        harness.run();
+        harness.snapshot(format!("manage_presets/{name}"));
+    }
+
+    #[test]
+    fn manage_collapsed() {
+        snapshot(
+            "manage_collapsed",
+            egui::vec2(560.0, 360.0),
+            make_app(false, None, None),
+        );
+    }
+
+    #[test]
+    fn manage_expanded() {
+        snapshot(
+            "manage_expanded",
+            egui::vec2(560.0, 460.0),
+            make_app(false, Some(FILTER_ID), None),
+        );
+    }
+
+    #[test]
+    fn manage_expanded_dirty() {
+        snapshot(
+            "manage_expanded_dirty",
+            egui::vec2(560.0, 460.0),
+            make_app(
+                false,
+                Some(FILTER_ID),
+                // Only the name differs from the saved preset ("vetted" -> "great").
+                Some((
+                    FILTER_ID,
+                    PresetEdit {
+                        name: "great".to_owned(),
+                        definition: "rating:>=4".to_owned(),
+                        is_default: true,
+                    },
+                )),
+            ),
+        );
+    }
+
+    #[test]
+    fn manage_empty() {
+        snapshot(
+            "manage_empty",
+            egui::vec2(560.0, 240.0),
+            make_app(true, None, None),
         );
     }
 }
