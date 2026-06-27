@@ -77,6 +77,46 @@ docker compose run --rm dev cargo test -p frontend snapshot_tests
 docker compose run --rm -e UPDATE_SNAPSHOTS=1 dev cargo test -p frontend snapshot_tests
 ```
 
+### Inspecting & measuring a failure
+
+When a snapshot test fails, egui_kittest writes three sibling artifacts next to
+the committed baseline `<name>.png`, in the same `frontend/tests/snapshots/…`
+directory. They're all gitignored (throwaway, rewritten every run):
+
+| File               | What it is                                                        |
+| ------------------ | ----------------------------------------------------------------- |
+| `<name>.diff.png`  | A visual diff highlighting the changed pixels.                    |
+| `<name>.new.png`   | The freshly rendered image.                                       |
+| `<name>.old.png`   | The previous baseline — only after `UPDATE_SNAPSHOTS` rewrote it.  |
+
+**`<name>.diff.png` is the fastest way to see _what_ changed** — open it first.
+To see all three at once, stitch them into one `old | diff | new` strip:
+
+```sh
+scripts/snapshot_composite.sh frontend/tests/snapshots/<group>/<name>.png
+# -> writes <name>.composite.png (also gitignored)
+```
+
+To **measure** an image to the pixel — e.g. confirm a margin is symmetric rather
+than eyeball it — use the measurement helper. It bakes in the rendering
+conventions (2× device scale / **PPP = 2**, the **8 logical-px harness margin**
+the test crop leaves around the content, and the resting border gray
+**`#C8C8C8`**) and classifies pixels as background / border / fill / content:
+
+```sh
+# Whole-image summary: size, content bbox, per-side margins, symmetry checks.
+scripts/measure_snapshot.py frontend/tests/snapshots/<group>/<name>.new.png
+
+# Horizontal scan at a device-pixel row (default: vertical middle); --col for a
+# vertical scan. Coordinates are device px; pass --logical to give them in
+# logical px. --json for machine-readable output.
+scripts/measure_snapshot.py <png> --row 41
+```
+
+It runs on plain `python3` (Pillow + NumPy are baked into the image), so a
+`from PIL import Image` script works out of the box if you'd rather poke at
+pixels directly.
+
 ## Optional: VS Code / Codespaces dev container
 
 If you use VS Code, [.devcontainer/devcontainer.json](../.devcontainer/devcontainer.json) lets you run your **whole editor** inside this same container instead of opening a shell with `docker compose run`. It's a supplement — it reuses the exact same `docker-compose.yml` (Dockerfile, cache volumes, UID matching, entrypoint), so nothing about the CLI workflow above changes.

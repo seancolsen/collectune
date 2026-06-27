@@ -21,6 +21,10 @@ ARG USER_GID=1000
 # (software) Vulkan implementation. egui_kittest renders widget snapshots
 # through wgpu, which needs a Vulkan adapter; lavapipe supplies one with no GPU
 # and no display server. vulkan-tools is only for the `vulkaninfo` smoke test.
+#
+# python3-pil (Pillow) + python3-numpy let agents load snapshot PNGs and read
+# pixels directly (`from PIL import Image`) for pixel-level measurement; the base
+# image has no pip, so these come from apt. See scripts/measure_snapshot.py.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         git \
@@ -32,6 +36,9 @@ RUN apt-get update \
         mesa-vulkan-drivers \
         libvulkan1 \
         vulkan-tools \
+        python3 \
+        python3-pil \
+        python3-numpy \
     && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
@@ -47,6 +54,34 @@ RUN npm install -g @anthropic-ai/claude-code
 # Ensure cargo is on PATH for login shells too (the base image's ENV PATH is
 # otherwise reset by /etc/profile in a `bash -l` context).
 RUN echo 'export PATH=/usr/local/cargo/bin:$PATH' > /etc/profile.d/cargo.sh
+
+# Quiet X-authorization warnings during headless snapshot rendering.
+#
+# This is a headless container: no X/Wayland server is present, but a DISPLAY
+# (e.g. ":0") can be injected at runtime — notably by the VS Code dev container.
+# When it is, the Vulkan loader tries to reach that display and spams
+# "Authorization required, but no authorization protocol specified" on every
+# egui_kittest render, drowning out the test output. Snapshot rendering uses
+# offscreen lavapipe and needs no display, so we clear DISPLAY/WAYLAND_DISPLAY.
+# (This does NOT disable rendering — the lavapipe Vulkan adapter is unaffected,
+# so snapshot determinism is intact.)
+#
+# We wire the same one-line script into every shell-entry path, because the
+# warning's source depends on how a command was launched:
+#   - BASH_ENV          -> non-interactive bash (the agent's tool shell, build
+#                          scripts) — these source neither bashrc nor profile.
+#   - /etc/bash.bashrc  -> interactive shells (the VS Code integrated terminal).
+#   - /etc/profile.d    -> login shells (`bash -l`).
+# `docker compose run … <cmd>` is additionally covered by entrypoint.sh, which
+# unsets the vars before exec'ing the command directly.
+RUN printf '%s\n' \
+        '# Headless container: see the Dockerfile for why these are cleared.' \
+        'unset DISPLAY WAYLAND_DISPLAY' \
+        > /etc/headless-display.sh \
+    && chmod 0644 /etc/headless-display.sh \
+    && echo '. /etc/headless-display.sh' > /etc/profile.d/headless-display.sh \
+    && echo '. /etc/headless-display.sh' >> /etc/bash.bashrc
+ENV BASH_ENV=/etc/headless-display.sh
 
 # Create the non-root user and give it ownership of the Rust toolchain dirs so
 # the cargo registry/target named volumes (mounted later) initialize writable.

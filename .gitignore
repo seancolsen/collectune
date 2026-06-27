@@ -24,6 +24,12 @@ backend/target/
 #   *.new.png  — the freshly rendered image when a test fails
 #   *.diff.png — a visual diff highlighting the changed pixels
 #   *.old.png  — a backup of the previous baseline after UPDATE_SNAPSHOTS rewrote it
+#   *.composite.png — an old|diff|new strip from scripts/snapshot_composite.sh
 *.new.png
 *.diff.png
 *.old.png
+*.composite.png
+
+# Python bytecode cache (e.g. from running scripts/measure_snapshot.py).
+__pycache__/
+*.pyc

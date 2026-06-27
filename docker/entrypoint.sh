@@ -8,4 +8,9 @@ sudo chown "$(id -u):$(id -g)" \
     /usr/local/cargo/registry \
     /usr/local/cargo/git \
     2>/dev/null || true
+# Headless container: drop any injected DISPLAY/WAYLAND_DISPLAY so the Vulkan
+# loader doesn't emit X-auth warnings during snapshot rendering. This covers the
+# `docker compose run … <cmd>` path, where <cmd> is exec'd directly (no bashrc/
+# profile). See the matching block in the Dockerfile.
+unset DISPLAY WAYLAND_DISPLAY
 exec "$@"
