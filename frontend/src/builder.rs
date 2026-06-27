@@ -661,9 +661,10 @@ impl App {
     }
 
     /// Renders the inline detail editor for the expanded preset `id`: an editable
-    /// name and definition, a revert button (enabled while dirty), a save button
-    /// (enabled while dirty and named), and the "Apply by default" checkbox.
-    /// Saving commits and triggers a re-run; reverting restores the saved version.
+    /// name and definition, the "Apply by default" checkbox, and — only while
+    /// there are unsaved edits — an unsaved-changes marker beside the name plus
+    /// revert and save buttons. Saving commits and triggers a re-run; reverting
+    /// restores the saved version.
     fn preset_editor(&mut self, ui: &mut egui::Ui, id: Uuid, run: &mut bool) {
         // Seed the edit buffer the first time this preset is expanded; thereafter
         // the persisted buffer (in `preset_edits`) is reused so unsaved changes
@@ -678,6 +679,19 @@ impl App {
         let mut save = false;
         let mut revert = false;
         section_frame(ui, PRESET_BG, |ui| {
+            // Wrap the "Apply by default" checkbox onto its own line (below the name
+            // row, above the definition) when the row can't hold the name field, the
+            // dirty controls, and the checkbox side by side without colliding.
+            let body = egui::TextStyle::Body.resolve(ui.style());
+            let spacing = ui.spacing().item_spacing.x;
+            let checkbox_w = galley_width(ui, "Apply by default", body) + 24.0;
+            let controls_w = if dirty {
+                18.0 + 2.0 * (crate::button::SIZE + spacing)
+            } else {
+                0.0
+            };
+            let needed = NAME_FIELD_WIDTH + controls_w + spacing + checkbox_w;
+            let wrap_default = ui.available_width() < needed;
             ui.horizontal(|ui| {
                 crate::text_input::add(
                     ui,
@@ -685,18 +699,25 @@ impl App {
                         .hint_text("Preset name")
                         .desired_width(NAME_FIELD_WIDTH),
                 );
-                revert = Button::icon(icons::REVERT)
-                    .enabled(dirty)
-                    .show(ui)
-                    .clicked();
-                save = Button::icon(icons::SAVE)
-                    .enabled(dirty && !edit.name.trim().is_empty())
-                    .show(ui)
-                    .clicked();
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.checkbox(&mut edit.is_default, "Apply by default");
-                });
+                // The unsaved-changes marker and the revert/save controls appear
+                // only while there are unsaved edits.
+                if dirty {
+                    ui.label(egui::RichText::new(icons::UNSAVED.codepoint).color(DELETE_RED));
+                    revert = Button::icon(icons::REVERT).show(ui).clicked();
+                    save = Button::icon(icons::SAVE)
+                        .enabled(!edit.name.trim().is_empty())
+                        .show(ui)
+                        .clicked();
+                }
+                if !wrap_default {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.checkbox(&mut edit.is_default, "Apply by default");
+                    });
+                }
             });
+            if wrap_default {
+                ui.checkbox(&mut edit.is_default, "Apply by default");
+            }
             let w = ui.available_width();
             sized_multiline(ui, &mut edit.definition, w);
         });
@@ -1101,12 +1122,13 @@ fn filter_custom_input(
 }
 
 /// Draws a collapsed preset "tab" (its name area). For a user preset this is a
-/// single line — chevron, preset icon, name, and (when dirty) a red star — at
-/// normal font size, padded to a one-line input's height, with no background
-/// (the background is painted by the caller only while expanded). The whole tab
-/// is clickable. For the built-in tab it's the Shuffle name beside a Reshuffle
-/// button, with no chevron and no expansion. Returns any click plus, when this
-/// tab is the expanded one, its rect (so the caller can paint its background).
+/// single line — chevron, preset icon, and name — at normal font size, padded to
+/// a one-line input's height, with no background (the background is painted by
+/// the caller only while expanded). While hovered it gains an outline; the whole
+/// tab is clickable. For the built-in tab it's the Shuffle name beside a
+/// Reshuffle button, with no chevron and no expansion. Returns any click plus,
+/// when this tab is the expanded one, its rect (so the caller can paint its
+/// background).
 fn draw_tab(ui: &mut egui::Ui, t: &TabInfo) -> (Option<TabClick>, Option<egui::Rect>) {
     if t.builtin {
         let mut click = None;
@@ -1136,24 +1158,33 @@ fn draw_tab(ui: &mut egui::Ui, t: &TabInfo) -> (Option<TabClick>, Option<egui::R
             } else {
                 icons::EXPAND_CLOSED
             };
+            // A single space after the chevron (vs two between the icon and name):
+            // the chevron glyph carries extra trailing side bearing, so one space
+            // visually matches the gap between the preset icon and the name.
             ui.label(format!(
-                "{}  {}  {}",
+                "{} {}  {}",
                 arrow.codepoint,
                 icons::PRESET.codepoint,
                 t.name
             ));
-            if t.dirty {
-                ui.label(egui::RichText::new(icons::UNSAVED.codepoint).color(DELETE_RED));
-            }
         });
     });
     let rect = inner.response.rect;
-    let clicked = inner
+    let resp = inner
         .response
         .interact(egui::Sense::click())
-        .on_hover_cursor(egui::CursorIcon::Default)
-        .clicked();
-    let click = clicked.then_some(TabClick::Toggle(t.id));
+        .on_hover_cursor(egui::CursorIcon::Default);
+    // While hovered, outline the whole name area (chevron + preset icon + name) so
+    // it reads as a click target, in the selected-preset background color.
+    if resp.hovered() {
+        ui.painter().rect_stroke(
+            rect.shrink(0.5),
+            TAB_RADIUS,
+            egui::Stroke::new(1.0, PRESET_BG),
+            egui::StrokeKind::Inside,
+        );
+    }
+    let click = resp.clicked().then_some(TabClick::Toggle(t.id));
     let expanded_rect = t.expanded.then_some(rect);
     (click, expanded_rect)
 }
@@ -1462,9 +1493,14 @@ mod snapshot_tests {
 
         harness.run();
         if scene.hover_name {
-            // The collapsed tab's name is the only node containing "vetted", so
-            // this aims the pointer at the tab's name area.
-            harness.get_by_label_contains(PRESET_NAME).hover();
+            // Aim the pointer at the tab's name area (the only node containing
+            // "vetted"). `Node::hover` can't be used directly: it derives the
+            // pointer position from the accesskit bounding box, which is in
+            // physical pixels, whereas `PointerMoved` expects logical points — so
+            // under PPP it would land at PPP× the intended spot, off the widget.
+            // Divide by PPP to convert back to logical points.
+            let center = harness.get_by_label_contains(PRESET_NAME).rect().center();
+            harness.hover_at(egui::pos2(center.x / PPP, center.y / PPP));
             harness.run();
         }
         // Crop tightly to the rendered builder rather than the whole container.
