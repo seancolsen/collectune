@@ -656,6 +656,8 @@ mod tests {
             .unwrap();
         conn.execute_batch(include_str!("migrations/0002.sql"))
             .unwrap();
+        conn.execute_batch(include_str!("migrations/0003.sql"))
+            .unwrap();
         conn
     }
 
@@ -671,7 +673,7 @@ mod tests {
     fn insert_file(conn: &Connection, id: &str) {
         conn.execute(
             "INSERT INTO file (id, path, hash, size, format, duration, mtime, added) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, now())",
+             VALUES (?, ?, ?, ?, ?, to_seconds(?), ?, now())",
             params![
                 id,
                 format!("/music/{id}.mp3"),
@@ -711,7 +713,7 @@ mod tests {
 
     fn insert_credit(conn: &Connection, track: &str, artist: &str) {
         conn.execute(
-            "INSERT INTO credit (track, artist, ord) VALUES (?, ?, ?)",
+            "INSERT INTO credit (track, artist, \"order\") VALUES (?, ?, ?)",
             params![track, artist, 1.0f32],
         )
         .unwrap();
@@ -753,7 +755,7 @@ mod tests {
             json!({ "operations": [
                 { "id": "art", "operation": "insert", "table": "artist", "values": { "name": "Beatles" } },
                 { "id": "cr", "operation": "insert", "table": "credit",
-                  "values": { "track": TRACK1, "artist": { "id": "art" }, "ord": 1 } }
+                  "values": { "track": TRACK1, "artist": { "id": "art" }, "order": 1 } }
             ]}),
         )
         .unwrap();
@@ -867,12 +869,12 @@ mod tests {
         let mut conn = setup();
         insert_file(&conn, FILE1);
         insert_track(&conn, TRACK1, FILE1, None);
-        // `genre` is not a unique constraint, so it can't identify a single row.
+        // `title` is not a unique constraint, so it can't identify a single row.
         let err = dml(
             &mut conn,
             json!({ "operations": [
                 { "id": "u", "operation": "update", "table": "track",
-                  "where": { "genre": "Rock" }, "values": { "genre": "Pop" } }
+                  "where": { "title": "Track Title" }, "values": { "title": "Retitled" } }
             ]}),
         )
         .unwrap_err();

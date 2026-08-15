@@ -5,7 +5,7 @@ use uuid::Uuid;
 
 use super::types::{
     ScanResults, StagingAlbum, StagingArtist, StagingCredit, StagingData, StagingDeleted,
-    StagingFile, StagingModified, StagingMoved, StagingTrack,
+    StagingFile, StagingModified, StagingMoved, StagingTrack, StagingTrackTag,
 };
 
 static DISC_FOLDER_PATTERN: &[&str] = &["disc", "cd", "disk"];
@@ -126,6 +126,7 @@ pub fn prepare_staging_data(
 
     let mut staging_files: Vec<StagingFile> = Vec::new();
     let mut staging_tracks: Vec<StagingTrack> = Vec::new();
+    let mut staging_track_tags: Vec<StagingTrackTag> = Vec::new();
     let mut staging_credits: Vec<StagingCredit> = Vec::new();
 
     for nf in &results.new_files {
@@ -153,15 +154,21 @@ pub fn prepare_staging_data(
             album: album_id,
             disc_number: nf.metadata.disc_number,
             track_number: nf.metadata.track_number,
-            genre: nf.metadata.genre.clone(),
         });
+
+        for genre in &nf.metadata.genres {
+            staging_track_tags.push(StagingTrackTag {
+                track: track_id,
+                tag: genre.clone(),
+            });
+        }
 
         for (i, ta) in nf.metadata.artists.iter().enumerate() {
             if let Some(&artist_id) = all_artists.get(&ta.artist) {
                 staging_credits.push(StagingCredit {
                     track: track_id,
                     artist: artist_id,
-                    ord: i as f64,
+                    order: i as f64,
                     role: ta.role.clone(),
                 });
             }
@@ -175,6 +182,7 @@ pub fn prepare_staging_data(
         albums: staging_albums,
         files: staging_files,
         tracks: staging_tracks,
+        track_tags: staging_track_tags,
         credits: staging_credits,
         moved: staging_moved,
         modified: staging_modified,

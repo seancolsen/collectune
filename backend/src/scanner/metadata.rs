@@ -102,7 +102,18 @@ fn assemble_tags_into_metadata<'a, T: IntoIterator<Item = &'a Tag>>(tags: T) -> 
         title: title_values.join(", "),
         track_number: track_number_value,
         disc_number: disk_number_value,
-        genre: genre_values.join(", "),
+        // Each genre tag on the file becomes its own tag record, so a file
+        // carrying several of them ends up linked to several. Trimming can
+        // collide two tags that `append_string_value` saw as distinct, hence the
+        // second dedup; a blank tag is dropped rather than becoming an
+        // empty-named tag shared across every sloppily tagged file.
+        genres: genre_values.into_iter().fold(Vec::new(), |mut acc, genre| {
+            let genre = genre.trim();
+            if !genre.is_empty() && !acc.iter().any(|g| g == genre) {
+                acc.push(genre.to_string());
+            }
+            acc
+        }),
         album: album_values.join(", "),
         year: date_value,
         artists: artist_values

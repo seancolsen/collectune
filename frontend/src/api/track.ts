@@ -24,7 +24,7 @@ export async function fetchTrackMetadata(
 ): Promise<TrackMetadata | undefined> {
   const sql =
     `with a as (` +
-    `select c.track, array_agg(ar.name order by c.ord) as artists ` +
+    `select c.track, array_agg(ar.name order by c."order") as artists ` +
     `from credit c join artist ar on ar.id = c.artist ` +
     `group by c.track` +
     `) ` +

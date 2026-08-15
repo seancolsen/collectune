@@ -12,7 +12,7 @@
 // through each foreign key that isn't the contextual filter), score each on four
 // axes — hops, nullability, uniqueness, type — and display the (up to two)
 // columns tied for the top score. The sort section reuses those columns, led by
-// `ord` when the table has one and trailed by the record's key so the order is
+// `order` when the table has one and trailed by the record's key so the order is
 // stable across refreshes.
 //
 // Pure: schema in, Querydown out. The reactive side (when a preview is fetched,
@@ -34,7 +34,7 @@ export interface EmbedSpec {
    * Empty when the schema offers nothing informative — the caller falls back to
    * the record's key, which always identifies it, if drily. */
   display: readonly string[];
-  /** The sorting section, e.g. `"\\ord \\artist.name \\artist"`; empty when
+  /** The sorting section, e.g. `"\\order \\artist.name \\artist"`; empty when
    * there is nothing to sort by. */
   sort: string;
 }
@@ -70,7 +70,7 @@ function isTemporal(type: string | undefined): boolean {
 
 /** Whether a column counts as unique in the query's context: it has a
  * single-column unique constraint, or it shares a two-column one with the
- * contextual filter column — `credit (track, ord)` makes `ord` unique *within*
+ * contextual filter column — `credit (track, "order")` makes `order` unique *within*
  * one track, which is exactly the context a preview of that track's credits is
  * shown in. */
 function isUnique(
@@ -156,7 +156,7 @@ function pickDisplay(candidates: readonly Candidate[]): Candidate[] {
   return candidates.filter((c) => c.points === max).slice(0, 2);
 }
 
-/** The sorting section: `ord` first when the table has such a column, then the
+/** The sorting section: `order` first when the table has such a column, then the
  * display columns (temporal ones descending, so the most recent is on top), then
  * the record's identifying key for an order that holds still across refreshes.
  * The contextual filter column is skipped throughout — it's constant over the
@@ -173,7 +173,7 @@ function buildSort(
     terms.push({ path, descending });
   };
 
-  if (table.columns.some((c) => c.name === "ord")) push("ord", false);
+  if (table.columns.some((c) => c.name === "order")) push("order", false);
   for (const candidate of chosen) push(candidate.path, candidate.temporal);
   for (const column of identifyingColumns(table)) push(column, false);
 

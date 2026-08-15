@@ -201,7 +201,7 @@ export type CompileSource =
  * prepended to every query before compilation. */
 export const PRELUDE = `#track.firstplay = #play.timestamp%min
 #track.lastplay = #play.timestamp%max
-#track.artists = #credit.artist.name%list(\\\\ord \\\\artist.name)
+#track.artists = #credit.artist.name%list(\\\\order \\\\artist.name)
 #track.year = album.year
 #track.added = file.added
 #track.duration = file.duration
@@ -209,9 +209,9 @@ export const PRELUDE = `#track.firstplay = #play.timestamp%min
 #track.number = track_number
 #track.__querydown_default_text_search:@x = [
   title:@x
-  genre:@x
   album.title:@x
   ++#artist{name:@x}
+  ++#tag{name:@x}
 ]
 #track.artist:@x = ++#artist{name:@x}`;
 

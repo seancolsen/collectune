@@ -7,7 +7,8 @@ pub struct TrackMetadata {
     pub title: String,
     pub track_number: Option<u8>,
     pub disc_number: Option<u8>,
-    pub genre: String,
+    /// One entry per distinct genre tag on the file, in the order they were read.
+    pub genres: Vec<String>,
     pub album: String,
     pub year: Option<u16>,
     pub artists: Vec<TrackArtistMetadata>,
@@ -106,14 +107,22 @@ pub struct StagingTrack {
     pub album: Option<Uuid>,
     pub disc_number: Option<u8>,
     pub track_number: Option<u8>,
-    pub genre: String,
 }
 
 pub struct StagingCredit {
     pub track: Uuid,
     pub artist: Uuid,
-    pub ord: f64,
+    pub order: f64,
+    /// The role's *name*. Names are resolved to `role` records in SQL, when the
+    /// staging tables are merged — see `staging::BATCH_SQL`.
     pub role: Option<String>,
+}
+
+/// One track/genre pairing, carrying the tag's *name*. Names are resolved to
+/// `tag` records in SQL, when the staging tables are merged.
+pub struct StagingTrackTag {
+    pub track: Uuid,
+    pub tag: String,
 }
 
 pub struct StagingMoved {
@@ -140,6 +149,7 @@ pub struct StagingData {
     pub albums: Vec<StagingAlbum>,
     pub files: Vec<StagingFile>,
     pub tracks: Vec<StagingTrack>,
+    pub track_tags: Vec<StagingTrackTag>,
     pub credits: Vec<StagingCredit>,
     pub moved: Vec<StagingMoved>,
     pub modified: Vec<StagingModified>,

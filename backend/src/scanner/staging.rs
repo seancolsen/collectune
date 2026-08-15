@@ -64,9 +64,10 @@ pub fn create_staging_tables(conn: &Connection) -> Result<(), duckdb::Error> {
         );
         CREATE TEMP TABLE staging_track (
             id UUID, file UUID, title TEXT, album UUID,
-            disc_number UTINYINT, track_number UTINYINT, genre TEXT
+            disc_number UTINYINT, track_number UTINYINT
         );
-        CREATE TEMP TABLE staging_credit (track UUID, artist UUID, ord REAL, role TEXT);
+        CREATE TEMP TABLE staging_track_tag (track UUID, tag TEXT);
+        CREATE TEMP TABLE staging_credit (track UUID, artist UUID, \"order\" REAL, role TEXT);
         CREATE TEMP TABLE staging_moved (id UUID, new_path TEXT, mtime BIGINT);
         CREATE TEMP TABLE staging_modified (id UUID, hash BLOB, size UINTEGER, duration REAL, mtime BIGINT);
         CREATE TEMP TABLE staging_deleted (file_id UUID, deletion_id UUID);
@@ -121,8 +122,15 @@ pub fn insert_staging_data(conn: &Connection, data: &StagingData) -> Result<(), 
                 album,
                 disc,
                 track_num,
-                t.genre,
             ])?;
+        }
+        app.flush()?;
+    }
+
+    {
+        let mut app = conn.appender("staging_track_tag")?;
+        for tt in &data.track_tags {
+            app.append_row(params![tt.track.to_string(), tt.tag])?;
         }
         app.flush()?;
     }
@@ -134,7 +142,7 @@ pub fn insert_staging_data(conn: &Connection, data: &StagingData) -> Result<(), 
             app.append_row(params![
                 c.track.to_string(),
                 c.artist.to_string(),
-                c.ord as f32,
+                c.order as f32,
                 role,
             ])?;
         }
@@ -174,27 +182,47 @@ pub fn insert_staging_data(conn: &Connection, data: &StagingData) -> Result<(), 
     Ok(())
 }
 
+// The staging tables carry role and tag *names*, not ids: the scanner reads names out of the files
+// and only this merge knows which of them the collection already has a record for. So each of the
+// two shared-value tables gets any name it is missing, and the rows that reference it are then
+// joined to it by name. `duration` arrives as a count of seconds and is widened to the INTERVAL the
+// column now holds.
 const BATCH_SQL: &str = "
 BEGIN TRANSACTION;
 
 INSERT INTO artist (id, name) SELECT id, name FROM staging_artist;
 INSERT INTO album (id, title, year) SELECT id, title, year FROM staging_album;
 
+INSERT INTO tag (id, name)
+SELECT uuid(), tag FROM staging_track_tag
+WHERE tag NOT IN (SELECT name FROM tag)
+GROUP BY tag;
+
+INSERT INTO role (id, name)
+SELECT uuid(), role FROM staging_credit
+WHERE role IS NOT NULL AND role NOT IN (SELECT name FROM role)
+GROUP BY role;
+
 INSERT INTO file (id, path, hash, size, format, duration, mtime, added, deletion)
-SELECT id, path, hash, size, format, duration, mtime, now(), NULL FROM staging_file;
+SELECT id, path, hash, size, format, to_seconds(duration), mtime, now(), NULL FROM staging_file;
 
 INSERT INTO track (id, file, start_position, end_position, title, album,
-                   disc_number, track_number, genre, rating)
-SELECT id, file, NULL, NULL, title, album, disc_number, track_number, genre, NULL
+                   disc_number, track_number, rating)
+SELECT id, file, NULL, NULL, title, album, disc_number, track_number, NULL
 FROM staging_track;
 
-INSERT INTO credit (track, artist, ord, role)
-SELECT track, artist, ord, role FROM staging_credit;
+INSERT INTO track_tag (track, tag)
+SELECT DISTINCT stt.track, t.id
+FROM staging_track_tag stt JOIN tag t ON t.name = stt.tag;
+
+INSERT INTO credit (track, artist, \"order\", role)
+SELECT sc.track, sc.artist, sc.\"order\", r.id
+FROM staging_credit sc LEFT JOIN role r ON r.name = sc.role;
 
 UPDATE file SET path = sm.new_path, mtime = sm.mtime
 FROM staging_moved sm WHERE file.id = sm.id;
 
-UPDATE file SET hash = sm.hash, size = sm.size, duration = sm.duration, mtime = sm.mtime
+UPDATE file SET hash = sm.hash, size = sm.size, duration = to_seconds(sm.duration), mtime = sm.mtime
 FROM staging_modified sm WHERE file.id = sm.id;
 
 INSERT INTO deletion (id, timestamp)
@@ -220,6 +248,7 @@ pub fn drop_staging_tables(conn: &Connection) -> Result<(), duckdb::Error> {
         DROP TABLE staging_album;
         DROP TABLE staging_file;
         DROP TABLE staging_track;
+        DROP TABLE staging_track_tag;
         DROP TABLE staging_credit;
         DROP TABLE staging_moved;
         DROP TABLE staging_modified;

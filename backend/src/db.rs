@@ -29,6 +29,10 @@ const MIGRATIONS: &[Migration] = &[
         version: 2,
         sql: include_str!("migrations/0002.sql"),
     },
+    Migration {
+        version: 3,
+        sql: include_str!("migrations/0003.sql"),
+    },
 ];
 
 fn init_db_version_metadata(conn: &Connection) -> Result<(), duckdb::Error> {
@@ -44,6 +48,10 @@ fn get_current_version(conn: &Connection) -> Result<u32, duckdb::Error> {
     conn.query_row("SELECT value FROM meta.version", [], |row| row.get(0))
 }
 
+/// Applies one migration and records the new version, all within a single
+/// transaction: either the whole SQL file lands and `meta.version` moves with
+/// it, or nothing does. A migration's SQL must therefore not open or close a
+/// transaction of its own.
 fn run_migration(conn: &mut Connection, migration: &Migration) -> Result<(), duckdb::Error> {
     let tx = conn.transaction()?;
     tx.execute_batch(migration.sql)?;

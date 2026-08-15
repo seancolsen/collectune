@@ -239,7 +239,7 @@ mod tests {
             { "name": "credit", "unique_constraints": [["track", "artist"]], "columns": [
                 { "name": "track", "type": "UUID", "nullable": false },
                 { "name": "artist", "type": "UUID", "nullable": false },
-                { "name": "ord", "type": "FLOAT", "nullable": true }
+                { "name": "order", "type": "FLOAT", "nullable": true }
             ] }
         ],
         "links": []

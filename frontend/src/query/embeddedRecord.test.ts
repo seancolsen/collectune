@@ -28,7 +28,7 @@ const TABLES: SchemaTable[] = [
     columns: [
       col("track", "UUID"),
       col("artist", "UUID"),
-      col("ord", "FLOAT", true),
+      col("order", "FLOAT", true),
       col("role", "VARCHAR", true),
     ],
     uniqueConstraints: [["track", "artist"]],
@@ -48,18 +48,18 @@ const TABLES: SchemaTable[] = [
 describe("embedSpec", () => {
   it("displays the top-scoring column, reaching through a foreign key for it", () => {
     // The spec's worked example: artist.name (3) beats role (2), which beats
-    // ord and artist.id (1 each) — and the foreign keys themselves are never
+    // order and artist.id (1 each) — and the foreign keys themselves are never
     // candidates. Only the top score shows, so this is one column.
     expect(embedSpec(TABLES, "credit", "track").display).toEqual([
       "$artist.name",
     ]);
   });
 
-  it("leads the sort with `ord`, then the display columns, then the key", () => {
+  it("leads the sort with `order`, then the display columns, then the key", () => {
     // The contextual `track` is skipped throughout: it's the same value on
     // every row of the list.
     expect(embedSpec(TABLES, "credit", "track").sort).toBe(
-      "\\\\ord \\\\artist.name \\\\artist",
+      "\\\\order \\\\artist.name \\\\artist",
     );
   });
 
@@ -79,7 +79,7 @@ describe("embedSpec", () => {
   });
 
   it("counts a column as unique when it pairs with the contextual column", () => {
-    // `credit (track, ord)` makes `ord` unique within one track: it gains the
+    // `credit (track, "order")` makes `order` unique within one track: it gains the
     // uniqueness point and beats `role`. Without that context the two tie, and
     // both show.
     const tables: SchemaTable[] = [
@@ -87,14 +87,14 @@ describe("embedSpec", () => {
         name: "credit",
         columns: [
           col("track", "UUID"),
-          col("ord", "FLOAT"),
+          col("order", "FLOAT"),
           col("role", "VARCHAR", true),
         ],
-        uniqueConstraints: [["track", "ord"]],
+        uniqueConstraints: [["track", "order"]],
       },
     ];
-    expect(embedSpec(tables, "credit", "track").display).toEqual(["$ord"]);
-    expect(embedSpec(tables, "credit").display).toEqual(["$ord", "$role"]);
+    expect(embedSpec(tables, "credit", "track").display).toEqual(["$order"]);
+    expect(embedSpec(tables, "credit").display).toEqual(["$order", "$role"]);
   });
 
   it("shows at most two columns, in assembly order, when several tie", () => {
@@ -130,7 +130,7 @@ describe("preview queries", () => {
     ).toEqual({
       base: "credit",
       filter: `track:="t1"`,
-      sort: "\\\\ord \\\\artist.name \\\\artist",
+      sort: "\\\\order \\\\artist.name \\\\artist",
       // The identifying columns first — that's how each child is addressed —
       // then the preview.
       display: "$track $artist $artist.name",
