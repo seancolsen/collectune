@@ -1,6 +1,7 @@
 import { Index, type JSX } from "solid-js";
 import type { CommandStore } from "../../state/commands";
 import type { AppStore, RecordRef } from "../../state/store";
+import { SETTINGS } from "../../state/settings";
 import { emptyDefinition, type QueryDefinition } from "../../query/definition";
 import { emptyCountResult, lemonadeGridResult } from "../gridFixture";
 import {
@@ -18,6 +19,7 @@ import {
 } from "../fixtures";
 
 import { AboutDialog } from "../../components/AboutModal";
+import { SettingDialog } from "../../components/SettingModal";
 import CommandPalette from "../../components/CommandPalette";
 import Explorer from "../../components/Explorer";
 import NowPlaying from "../../components/NowPlaying";
@@ -189,11 +191,26 @@ export const STORIES: Record<string, Story> = {
     width: 200,
     // Tall enough to clear the menu's bottom edge (its last row is "About
     // RadioCrate"), so the snapshot isn't cropping the panel.
-    height: 330,
+    height: 350,
     render: () => (
       <Menu defaultOpen width="180px" trigger={() => null}>
         <SettingsMenu />
       </Menu>
+    ),
+  },
+  // The Querydown prelude setting in its editor, holding the default value —
+  // the state the dialog opens in for anyone who hasn't customized it, and the
+  // one that shows both the monospace field and the disabled "Reset to default".
+  "settings/prelude": {
+    render: () => (
+      <SettingDialog
+        name={SETTINGS.querydown_prelude.name}
+        description={SETTINGS.querydown_prelude.description}
+        value={SETTINGS.querydown_prelude.default}
+        defaultValue={SETTINGS.querydown_prelude.default}
+        onSave={() => {}}
+        onClose={() => {}}
+      />
     ),
   },
   // The rebind dialog holding a chord another command already owns, so the

@@ -53,8 +53,10 @@ function rpcResult(method: string, params: unknown): unknown {
       return QUERIES_FIXTURE;
     case "preset.list":
       return PRESETS_FIXTURE;
-    // No persisted overrides, so every command shows its built-in default.
+    // No persisted overrides, so every command shows its built-in default and
+    // every setting its built-in value.
     case "keybinding.list":
+    case "setting.list":
       return [];
     // Constant, never the real `__BUILD_ID__`: a story that showed the build
     // this checkout happens to be would rewrite its baseline on every commit.

@@ -10,7 +10,7 @@ use std::sync::Arc;
 use api_schema::{
     AppVersion, Keybinding, KeybindingDeleteParams, Preset, PresetDeleteParams, PresetUpdateParams,
     Query, QueryDeleteParams, QueryRecordPlayParams, QueryRenameParams,
-    QueryUpdateDefinitionParams,
+    QueryUpdateDefinitionParams, Setting, SettingDeleteParams,
 };
 use axum::Json;
 use axum::extract::State;
@@ -223,6 +223,27 @@ fn dispatch_legacy(state: &AppState, method: &str, params: Value) -> Result<Valu
                 Ok(Value::Null)
             })
         }
+        // The settings key/value store. A row exists only for a setting the user
+        // has customized, so `setting.delete` is how the frontend resets one to
+        // the default it holds in code — see `api_schema::Setting`.
+        "setting.list" => state.read(|conn| -> Result<Value, String> {
+            let settings = list_settings(conn)?;
+            serde_json::to_value(settings).map_err(|e| e.to_string())
+        }),
+        "setting.set" => {
+            let setting: Setting = from_params(params)?;
+            state.write(|conn| {
+                set_setting(conn, &setting.key, &setting.value)?;
+                Ok(Value::Null)
+            })
+        }
+        "setting.delete" => {
+            let p: SettingDeleteParams = from_params(params)?;
+            state.write(|conn| {
+                delete_setting(conn, &p.key)?;
+                Ok(Value::Null)
+            })
+        }
         other => Err(format!("method not found: {other}")),
     }
 }
@@ -399,6 +420,39 @@ fn delete_keybinding(conn: &Connection, command_id: &str) -> Result<(), String> 
     conn.execute(
         "DELETE FROM settings.keybinding WHERE command_id = ?",
         duckdb::params![command_id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+fn list_settings(conn: &Connection) -> Result<Vec<Setting>, String> {
+    let mut stmt = conn
+        .prepare("SELECT \"key\", \"value\" FROM settings.settings ORDER BY \"key\"")
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(Setting {
+                key: row.get(0)?,
+                value: row.get(1)?,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+    rows.collect::<Result<_, _>>().map_err(|e| e.to_string())
+}
+
+fn set_setting(conn: &Connection, key: &str, value: &str) -> Result<(), String> {
+    conn.execute(
+        "INSERT OR REPLACE INTO settings.settings (\"key\", \"value\") VALUES (?, ?)",
+        duckdb::params![key, value],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+fn delete_setting(conn: &Connection, key: &str) -> Result<(), String> {
+    conn.execute(
+        "DELETE FROM settings.settings WHERE \"key\" = ?",
+        duckdb::params![key],
     )
     .map_err(|e| e.to_string())?;
     Ok(())

@@ -2,7 +2,7 @@
 // Source of truth: the `api-schema` Rust crate. Re-run the command after
 // changing it, and commit the result.
 
-import type { AppVersion, DmlRequest, DmlResult, Keybinding, KeybindingDeleteParams, Preset, PresetDeleteParams, PresetUpdateParams, Query, QueryDeleteParams, QueryRecordPlayParams, QueryRenameParams, QueryUpdateDefinitionParams } from "./types";
+import type { AppVersion, DmlRequest, DmlResult, Keybinding, KeybindingDeleteParams, Preset, PresetDeleteParams, PresetUpdateParams, Query, QueryDeleteParams, QueryRecordPlayParams, QueryRenameParams, QueryUpdateDefinitionParams, Setting, SettingDeleteParams } from "./types";
 import { handleAuthRedirect, rpcCall } from "./rpc";
 
 export async function queryList(): Promise<Query[]> {
@@ -55,6 +55,18 @@ export async function keybindingSet(params: Keybinding): Promise<null> {
 
 export async function keybindingDelete(params: KeybindingDeleteParams): Promise<null> {
   return (await rpcCall("keybinding.delete", params)) as null;
+}
+
+export async function settingList(): Promise<Setting[]> {
+  return (await rpcCall("setting.list", null)) as Setting[];
+}
+
+export async function settingSet(params: Setting): Promise<null> {
+  return (await rpcCall("setting.set", params)) as null;
+}
+
+export async function settingDelete(params: SettingDeleteParams): Promise<null> {
+  return (await rpcCall("setting.delete", params)) as null;
 }
 
 export async function dml(params: DmlRequest): Promise<DmlResult> {

@@ -47,6 +47,8 @@ export type Preset = { id: string, name: string, baseTable: string, section: str
 
 export type Keybinding = { commandId: string, chord: string | null, };
 
+export type Setting = { key: string, value: string, };
+
 export type AppVersion = { buildId: string, serverVersion: string, };
 
 export type QueryDeleteParams = { id: string, };
@@ -62,3 +64,5 @@ export type PresetUpdateParams = { id: string, name: string, definition: string,
 export type PresetDeleteParams = { id: string, };
 
 export type KeybindingDeleteParams = { commandId: string, };
+
+export type SettingDeleteParams = { key: string, };

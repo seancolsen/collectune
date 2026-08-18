@@ -5,6 +5,7 @@ import {
   type AudioQualityPref,
   type ThemePref,
 } from "../state/store";
+import { SETTINGS, SETTING_KEYS } from "../state/settings";
 import {
   MenuHeading,
   MenuItem,
@@ -32,8 +33,9 @@ const AUDIO_QUALITY_OPTIONS: {
 ];
 
 /** The Settings menu body: a Light/Dark/System theme picker, a Higher
- * quality/Lower bandwidth audio streaming picker, and the Keyboard shortcuts
- * entry. */
+ * quality/Lower bandwidth audio streaming picker, one entry per configurable
+ * setting (each opening its editor dialog), and the Keyboard shortcuts and About
+ * entries. */
 export default function SettingsMenu(): JSX.Element {
   const store = useAppState();
   return (
@@ -64,6 +66,17 @@ export default function SettingsMenu(): JSX.Element {
         )}
       </For>
       <MenuSeparator />
+      {/* Driven by the settings catalogue, so a new setting shows up here with
+          its name and needs no entry of its own. */}
+      <For each={SETTING_KEYS}>
+        {(key) => (
+          <MenuItem
+            icon={Icons.Querydown}
+            label={SETTINGS[key].name}
+            onClick={() => store.openSetting(key)}
+          />
+        )}
+      </For>
       <MenuItem
         icon={Icons.Keyboard}
         label="Keyboard shortcuts"

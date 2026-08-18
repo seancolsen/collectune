@@ -68,6 +68,20 @@ pub struct Keybinding {
     pub chord: Option<String>,
 }
 
+/// One user-customized setting: an opaque string `value` stored under a string
+/// `key`. See `settings.settings` in migration 0004.
+///
+/// The backend never interprets either field. Which keys exist, what a value
+/// means, and what the default is when no row exists all live in the frontend
+/// (`frontend/src/state/settings.ts`), so a row is present only for a setting
+/// the user has changed and deleting it restores the default.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct Setting {
+    pub key: String,
+    pub value: String,
+}
+
 /// The `build_id` a server reports when it embeds no frontend of its own — the
 /// standalone dev server, which serves its client from Vite instead. A client
 /// seeing this must skip the staleness comparison entirely rather than conclude
@@ -150,6 +164,13 @@ pub struct PresetDeleteParams {
 #[serde(rename_all = "camelCase")]
 pub struct KeybindingDeleteParams {
     pub command_id: String,
+}
+
+/// Params for `setting.delete`.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct SettingDeleteParams {
+    pub key: String,
 }
 
 /// One method in the RPC surface, as consumed by the client generator.
@@ -251,6 +272,24 @@ pub const METHODS: &[Method] = &[
         result: "null",
     },
     Method {
+        wire: "setting.list",
+        func: "settingList",
+        params: None,
+        result: "Setting[]",
+    },
+    Method {
+        wire: "setting.set",
+        func: "settingSet",
+        params: Some("Setting"),
+        result: "null",
+    },
+    Method {
+        wire: "setting.delete",
+        func: "settingDelete",
+        params: Some("SettingDeleteParams"),
+        result: "null",
+    },
+    Method {
         wire: "dml",
         func: "dml",
         params: Some("DmlRequest"),
@@ -279,6 +318,7 @@ pub fn type_decls() -> Vec<String> {
         format!("export {}", Query::decl(&cfg)),
         format!("export {}", Preset::decl(&cfg)),
         format!("export {}", Keybinding::decl(&cfg)),
+        format!("export {}", Setting::decl(&cfg)),
         format!("export {}", AppVersion::decl(&cfg)),
         format!("export {}", QueryDeleteParams::decl(&cfg)),
         format!("export {}", QueryRecordPlayParams::decl(&cfg)),
@@ -287,5 +327,6 @@ pub fn type_decls() -> Vec<String> {
         format!("export {}", PresetUpdateParams::decl(&cfg)),
         format!("export {}", PresetDeleteParams::decl(&cfg)),
         format!("export {}", KeybindingDeleteParams::decl(&cfg)),
+        format!("export {}", SettingDeleteParams::decl(&cfg)),
     ]
 }

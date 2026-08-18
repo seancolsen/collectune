@@ -72,6 +72,9 @@ export interface RowContext {
   presets: Preset[];
   /** The enriched introspection JSON the compiler takes. */
   schemaJson: string;
+  /** The Querydown prelude in force (the `querydown_prelude` setting), so the
+   * re-read compiles against exactly what the displayed rows came from. */
+  prelude: string;
   /** Every record the row identifies — one per table whose key it carries (what
    * the store's `rowRecords` returns). The base table's entry narrows the query;
    * all of them together find the row again in a whole-query re-run. */
@@ -160,7 +163,12 @@ async function fetchNarrowedRow(
   def: QueryDefinition,
   context: RowContext,
 ): Promise<RowLocation | undefined> {
-  const { sql } = compileSavedQuery(def, context.presets, context.schemaJson);
+  const { sql } = compileSavedQuery(
+    def,
+    context.presets,
+    context.schemaJson,
+    context.prelude,
+  );
   const table = await runSql(sql);
   if (table.numRows !== 1) return undefined;
   return { table, row: 0 };
@@ -179,6 +187,7 @@ async function findRowInFullRun(
     context.definition,
     context.presets,
     context.schemaJson,
+    context.prelude,
   );
   const table = await runSql(sql);
   // Which output column carries which key column: the same lineage question the

@@ -20,6 +20,9 @@ import {
   queryRecordPlay,
   queryRename,
   queryUpdateDefinition,
+  settingDelete,
+  settingList,
+  settingSet,
   type DmlOperation,
   type DmlResult,
   type Preset,
@@ -35,6 +38,13 @@ import {
   type SchemaTable,
 } from "../query/schema";
 import { compileSavedQuery } from "../query/compile";
+import {
+  overridesFromEntries,
+  settingValue,
+  withSetting,
+  type SettingKey,
+  type SettingOverrides,
+} from "./settings";
 import {
   cloneDefinition,
   defsEqual,
@@ -245,6 +255,8 @@ export interface AppState {
   pendingDelete: { id: string; name: string; unsaved: boolean } | null;
   /** Whether the About dialog (versions + the update actions) is open. */
   aboutOpen: boolean;
+  /** The setting whose editor dialog is open (null when none is). */
+  settingEditor: SettingKey | null;
   /** The track in the now-playing bar (null when nothing is loaded). */
   currentTrack: CurrentTrack | null;
   /** Transport state for that track. */
@@ -692,6 +704,16 @@ export interface AppStore {
    * `app.check_for_updates` command's action. */
   openAbout: () => void;
   closeAbout: () => void;
+
+  // Settings (the `settings.settings` key/value store; see `state/settings.ts`).
+  /** A setting's value in force: the user's customization, or its default. */
+  settingValue: (key: SettingKey) => string;
+  /** Store a setting's value and re-run the open queries under it. A value
+   * equal to the default is stored as a *deletion* — the reset path. */
+  saveSetting: (key: SettingKey, value: string) => void;
+  /** Open a setting's editor dialog (the Settings menu's entries). */
+  openSetting: (key: SettingKey) => void;
+  closeSetting: () => void;
 }
 
 function createAppStore(): AppStore {
@@ -718,6 +740,7 @@ function createAppStore(): AppStore {
     renaming: null,
     pendingDelete: null,
     aboutOpen: false,
+    settingEditor: null,
     currentTrack: null,
     playback: { playing: false, position: 0, duration: null, hasNext: false },
   });
@@ -760,6 +783,22 @@ function createAppStore(): AppStore {
     const json = schema();
     return json === undefined ? [] : parseSchemaTables(json);
   });
+
+  // User-customized settings, loaded once. A plain signal rather than a slice of
+  // the store: overrides are a whole map replaced at once, and `setState` on an
+  // object *merges* — which can't express removing a key, the very thing
+  // resetting a setting to its default does.
+  const [settingOverrides, setSettingOverrides] =
+    createSignal<SettingOverrides>({});
+  void settingList()
+    .then((list) => setSettingOverrides(overridesFromEntries(list ?? [])))
+    .catch((err) => console.error("setting list failed", err));
+
+  const valueOfSetting = (key: SettingKey): string =>
+    settingValue(settingOverrides(), key);
+
+  /** The Querydown prepended to every compiled query, as the user has it. */
+  const prelude = (): string => valueOfSetting("querydown_prelude");
 
   const setSidebarOpen = (open: boolean) => {
     setState("sidebarOpen", open);
@@ -969,6 +1008,7 @@ function createAppStore(): AppStore {
           def,
           effectivePresets(),
           schemaJson,
+          prelude(),
         );
         const table = await runSql(sql);
         // Decode the result once, here — never per resize/frame (§6). Display
@@ -1146,6 +1186,7 @@ function createAppStore(): AppStore {
       definition: unwrap(t.live),
       presets: effectivePresets(),
       schemaJson,
+      prelude: prelude(),
       records,
     };
   };
@@ -1973,6 +2014,7 @@ function createAppStore(): AppStore {
           unwrap(t.live),
           effectivePresets(),
           schemaJson,
+          prelude(),
         );
         setState("viewSql", sql);
       } catch (err) {
@@ -1982,6 +2024,23 @@ function createAppStore(): AppStore {
     closeViewSql: () => setState("viewSql", null),
     openAbout: () => setState("aboutOpen", true),
     closeAbout: () => setState("aboutOpen", false),
+    settingValue: valueOfSetting,
+    saveSetting: (key, value) => {
+      const next = withSetting(settingOverrides(), key, value);
+      setSettingOverrides(next);
+      const stored = next[key];
+      const persisted =
+        stored === undefined
+          ? settingDelete({ key })
+          : settingSet({ key, value: stored });
+      void persisted.catch((err) => console.error("setting save failed", err));
+      // Every setting so far feeds the compiler, and the rows on screen were
+      // compiled under the old value — so they're now stale. Re-run each open
+      // query rather than leave results that no longer answer what they claim.
+      for (const t of state.tabs) if (t.kind === "query") runQuery(t.id);
+    },
+    openSetting: (key) => setState("settingEditor", key),
+    closeSetting: () => setState("settingEditor", null),
   };
 }
 

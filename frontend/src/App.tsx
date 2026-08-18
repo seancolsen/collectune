@@ -9,6 +9,7 @@ import NowPlaying from "./components/NowPlaying";
 import CommandPalette from "./components/CommandPalette";
 import UpdateBanner from "./components/UpdateBanner";
 import AboutModal from "./components/AboutModal";
+import SettingModal from "./components/SettingModal";
 
 /** The content area of the active tab: the page its kind calls for, or a blank
  * panel when no tab is open. The one place tab kinds fan out into pages — every
@@ -75,6 +76,7 @@ export default function App() {
       {/* App-wide overlays, above every panel and both layouts. */}
       <CommandPalette />
       <AboutModal />
+      <SettingModal />
     </div>
   );
 }

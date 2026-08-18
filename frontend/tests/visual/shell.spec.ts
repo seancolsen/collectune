@@ -2,7 +2,8 @@ import { test, expect } from "@playwright/test";
 import { SCHEMES, openStory, snapshot } from "./harness";
 
 // The app's furniture, each piece on its own: the left sidebar in both of its
-// layouts, the explorer that fills it, the settings menu and its rebind dialog,
+// layouts, the explorer that fills it, the settings menu with the prelude and
+// rebind dialogs it raises,
 // the client-update bar and the About dialog, the now-playing bar and its menu,
 // and the command palette.
 
@@ -51,6 +52,18 @@ for (const colorScheme of SCHEMES) {
     ).toBeVisible();
     await expect(stage).toHaveScreenshot(
       snapshot("settings/menu", colorScheme),
+    );
+  });
+
+  // The Querydown prelude in its setting editor, at the default value: the
+  // monospace field and the disabled "Reset to default" it opens with. Shot
+  // through the dialog — it portals out of the stage.
+  test(`settings/prelude - ${colorScheme}`, async ({ page }) => {
+    await openStory(page, "settings/prelude", colorScheme);
+    const dialog = page.getByRole("dialog");
+    await expect(dialog.getByRole("button", { name: "Save" })).toBeDisabled();
+    await expect(dialog).toHaveScreenshot(
+      snapshot("settings/prelude", colorScheme),
     );
   });
 

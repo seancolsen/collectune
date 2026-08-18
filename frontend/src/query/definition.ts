@@ -198,8 +198,11 @@ export type CompileSource =
     };
 
 /** Querydown definitions (RadioCrate's computed columns + custom comparisons)
- * prepended to every query before compilation. */
-export const PRELUDE = `#track.firstplay = #play.timestamp%min
+ * prepended to every query before compilation — unless the user has customized
+ * the prelude, in which case theirs is prepended instead. This is the default
+ * behind the `querydown_prelude` setting (`state/settings.ts`); nothing outside
+ * that catalogue should reach for it. */
+export const DEFAULT_PRELUDE = `#track.firstplay = #play.timestamp%min
 #track.lastplay = #play.timestamp%max
 #track.artists = #credit.artist.name%list(\\\\order \\\\artist.name)
 #track.year = album.year
