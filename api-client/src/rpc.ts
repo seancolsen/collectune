@@ -18,10 +18,60 @@ interface RpcEnvelope {
 let nextId = 1;
 
 /**
+ * Where to send the browser to renew a session the proxy in front of us has
+ * expired: a path under `/api`, which the service worker is configured never to
+ * answer, so the navigation actually reaches the network. The `reauth` handler in
+ * `backend/src/server.rs` carries the full story.
+ */
+const REAUTH_PATH = "/api/reauth";
+
+/**
+ * Thrown when a request was answered by a redirect instead of by the API —
+ * something in front of the server wants the browser to sign in again. Callers
+ * rarely need to catch it: by the time it is thrown, {@link handleAuthRedirect}
+ * has already sent the browser off to sign in.
+ */
+export class AuthRedirectError extends Error {
+  constructor(url: string) {
+    super(`Request to ${url} was redirected to a sign-in page.`);
+    this.name = "AuthRedirectError";
+  }
+}
+
+/** Guards the navigation, so a page-load's worth of failing calls doesn't queue
+ * up one apiece. */
+let reauthenticating = false;
+
+/**
+ * Turns an intercepted request into a sign-in.
+ *
+ * Both transports here fetch with `redirect: "manual"`, which is what makes this
+ * detectable at all. The API never redirects, so a redirect can only have come
+ * from something in front of it — but under the default `redirect: "follow"` the
+ * browser chases the proxy's sign-in page cross-origin, gets no CORS headers on
+ * it, and hands back a bare `TypeError: Failed to fetch`, indistinguishable from
+ * being offline. `"manual"` yields a well-formed `opaqueredirect` response
+ * instead, so "your session ended" stops looking like "the network is down".
+ *
+ * Navigating is the point: an app served by a service worker can renew its
+ * session no other way, because the proxy can only sign a browser in by
+ * redirecting a *navigation*, and a `fetch` cannot become one.
+ */
+export function handleAuthRedirect(res: Response, url: string): void {
+  if (res.type !== "opaqueredirect") return;
+  if (!reauthenticating) {
+    reauthenticating = true;
+    location.assign(REAUTH_PATH);
+  }
+  throw new AuthRedirectError(url);
+}
+
+/**
  * POSTs a single JSON-RPC 2.0 call to `/api/rpc` and returns its result. The wire
  * is already camelCase (the server renames via serde), so callers can cast the
  * result to the generated type directly. Same-origin in production; in dev Vite
- * proxies `/api` to the backend. Throws on a transport error or an RPC `error`.
+ * proxies `/api` to the backend. Throws on a transport error, an RPC `error`, or
+ * an intercepted request (see {@link handleAuthRedirect}).
  */
 export async function rpcCall(
   method: string,
@@ -31,7 +81,9 @@ export async function rpcCall(
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ jsonrpc: "2.0", method, params, id: nextId++ }),
+    redirect: "manual",
   });
+  handleAuthRedirect(res, "/api/rpc");
   if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
   const env = (await res.json()) as RpcEnvelope;
   if (env.error) throw new Error(env.error.message ?? "rpc error");

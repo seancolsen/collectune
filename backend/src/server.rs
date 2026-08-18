@@ -6,7 +6,8 @@ use arrow_ipc::writer::StreamWriter;
 use axum::Router;
 use axum::body::Body;
 use axum::extract::State;
-use axum::http::{Response, StatusCode};
+use axum::http::{Response, StatusCode, header};
+use axum::response::{IntoResponse, Redirect};
 use axum::routing::{get, post};
 use bytes::Bytes;
 use duckdb::Connection;
@@ -90,8 +91,40 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/query", post(query))
         .route("/rpc", post(crate::rpc::rpc))
         .route("/tracks/{id}/stream", get(crate::stream::stream_track))
+        .route("/reauth", get(reauth))
         .layer(CorsLayer::permissive())
         .with_state(state)
+}
+
+/// Sends a browser back to the app once an authenticating reverse proxy has let
+/// it through — the client's way out of a login it cannot otherwise reach.
+///
+/// A PWA behind a redirect-based identity proxy (Cloudflare Access here, but
+/// oauth2-proxy and friends work the same way) has a bootstrapping problem: the
+/// service worker answers navigations from its precache, so the proxy never gets
+/// to redirect one to its sign-in page. All that reaches the network are
+/// `fetch`es, and a `fetch` cannot render a sign-in page — it just fails. The
+/// session cannot be renewed from inside the app, no matter how many times it is
+/// reopened.
+///
+/// So the client navigates here instead. This path lives under `/api`, which the
+/// service worker is configured never to answer (see
+/// `navigateFallbackDenylist`), so the request reaches the proxy, which
+/// intercepts it, authenticates the browser and sends it back — at which point
+/// this handler bounces it to the app root. The response body is never seen; the
+/// redirect is the whole payload.
+///
+/// With nothing in front of us it is simply a redirect to `/`, which is what
+/// lets the client call it without knowing whether it is proxied.
+async fn reauth() -> impl IntoResponse {
+    // `no-store` because a cached bounce would skip the trip to the proxy that
+    // is the entire point of this endpoint.
+    (
+        [(header::CACHE_CONTROL, "no-store")],
+        // 303: this is a redirect to a different resource, not a relocation of
+        // `/api/reauth` itself, and it must be followed with GET.
+        Redirect::to("/"),
+    )
 }
 
 /// Bridges synchronous Arrow IPC writes to an async byte stream.

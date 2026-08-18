@@ -5,3 +5,4 @@
 export * from "./types";
 export * from "./client";
 export type { RpcError } from "./rpc";
+export { AuthRedirectError } from "./rpc";

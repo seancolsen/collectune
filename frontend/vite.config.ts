@@ -87,8 +87,15 @@ export default defineConfig({
       manifest: false, // keep the hand-tuned static manifest (public/)
       workbox: {
         navigateFallback: "/index.html",
-        // Never let the SW answer API calls.
-        navigateFallbackDenylist: [/^\/api\//],
+        // Paths the SW must never answer from precache. `/api/` because those
+        // are API calls, and `/cdn-cgi/` because that is the reserved namespace
+        // an authenticating reverse proxy in front of us (Cloudflare Access)
+        // serves its login and callback endpoints from. Swallowing the callback
+        // is fatal and silent: the proxy authenticates the browser, redirects it
+        // back to set its session cookie, the SW answers that navigation out of
+        // the precache instead, the cookie is never set, and the client is left
+        // permanently unable to complete a login it keeps being sent to.
+        navigateFallbackDenylist: [/^\/api\//, /^\/cdn-cgi\//],
         runtimeCaching: [{ urlPattern: /^\/api\//, handler: "NetworkOnly" }],
         // The build id is read off disk by the server, never fetched by the
         // browser, so precaching it would only add a dead cache entry.

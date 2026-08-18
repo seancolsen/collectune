@@ -3,7 +3,7 @@
 // changing it, and commit the result.
 
 import type { AppVersion, DmlRequest, DmlResult, Keybinding, KeybindingDeleteParams, Preset, PresetDeleteParams, PresetUpdateParams, Query, QueryDeleteParams, QueryRecordPlayParams, QueryRenameParams, QueryUpdateDefinitionParams } from "./types";
-import { rpcCall } from "./rpc";
+import { handleAuthRedirect, rpcCall } from "./rpc";
 
 export async function queryList(): Promise<Query[]> {
   return (await rpcCall("query.list", null)) as Query[];
@@ -77,7 +77,9 @@ export async function postQuery(sql: string): Promise<ArrayBuffer> {
     method: "POST",
     headers: { "content-type": "text/plain" },
     body: sql,
+    redirect: "manual",
   });
+  handleAuthRedirect(res, "/api/query");
   if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
   return res.arrayBuffer();
 }
