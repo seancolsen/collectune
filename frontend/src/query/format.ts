@@ -155,13 +155,34 @@ function formatNumber(value: string, min: number, max: number): string | null {
   return s;
 }
 
-/** Formats a number of seconds as `M:SS` (minutes unpadded, seconds zero-padded),
+/** An interval cell as `api/query.ts` renders it: an optional day part (months
+ * are not a fixed number of seconds, so an interval carrying one is not a
+ * duration), then `HH:MM:SS[.fff]`. */
+const INTERVAL_RE = /^(?:(-?\d+) days? )?(-?)(\d+):(\d{2}):(\d{2}(?:\.\d+)?)$/;
+
+/** Seconds in a duration cell, which reaches here in either of two forms: the
+ * bare number a `REAL`/`DOUBLE` column gives, or the `HH:MM:SS` text an
+ * `INTERVAL` column does (`file.duration` and the `track.*_position` columns are
+ * intervals — see migration 0003). `null` when it is neither. */
+function durationSeconds(value: string): number | null {
+  const numeric = Number(value);
+  if (!Number.isNaN(numeric)) return numeric;
+
+  const m = INTERVAL_RE.exec(value);
+  if (!m) return null;
+  // The day and time parts carry their own signs, as DuckDB prints them
+  // (`2 days -00:01:30`).
+  const time = Number(m[3]) * 3600 + Number(m[4]) * 60 + Number(m[5]);
+  return Number(m[1] ?? 0) * 86_400 + (m[2] === "-" ? -time : time);
+}
+
+/** Formats a duration as `M:SS` (minutes unpadded, seconds zero-padded),
  * rounded to the nearest second. */
 function formatDuration(value: string): string | null {
   const trimmed = value.trim();
   if (trimmed === "") return null;
-  const secs = Number(trimmed);
-  if (Number.isNaN(secs)) return null;
+  const secs = durationSeconds(trimmed);
+  if (secs === null) return null;
   const total = Math.round(secs);
   const sign = total < 0 ? "-" : "";
   const abs = Math.abs(total);

@@ -182,3 +182,52 @@ describe("QueryResult.patchRow", () => {
     expect(result.text(1, result.visible[0])).toBe("Hold Up");
   });
 });
+
+// The third real-backend regression: a DuckDB INTERVAL column. apache-arrow
+// decodes it to an `Int32Array` of nonsense — iterable, so the list-detection
+// fallback above would classify the column as a list and paint a row of pills.
+// The decode path has to read the buffer itself and keep the column scalar.
+describe("buildResultFromArrow with an INTERVAL column", () => {
+  /** `Interval(MONTH_DAY_NANO)` over the byte layout arrow-rs writes: int32
+   * months, int32 days, int64 nanoseconds. */
+  function intervalColumn(seconds: readonly number[]): arrow.Vector {
+    const buffer = new ArrayBuffer(16 * seconds.length);
+    const view = new DataView(buffer);
+    seconds.forEach((s, i) => {
+      view.setInt32(i * 16, 0, true);
+      view.setInt32(i * 16 + 4, 0, true);
+      view.setBigInt64(i * 16 + 8, BigInt(Math.round(s * 1e9)), true);
+    });
+    return new arrow.Vector([
+      arrow.makeData({
+        type: new arrow.Interval(arrow.IntervalUnit.MONTH_DAY_NANO),
+        length: seconds.length,
+        nullCount: 0,
+        data: new Int32Array(buffer),
+      }),
+    ]);
+  }
+
+  const table = new arrow.Table({ duration: intervalColumn([196, 234.5]) });
+
+  it("stays scalar and formats as a duration", () => {
+    const result = buildResultFromArrow(table, [
+      mapAnno([
+        [
+          "formatter",
+          new Map([["type", "duration"]]) as unknown as AnnotationValue,
+        ],
+      ]),
+    ]);
+    const column = result.columns[0];
+    expect(column.isList).toBe(false);
+    expect(result.text(0, column)).toBe("3:16");
+    expect(result.text(1, column)).toBe("3:55");
+  });
+
+  it("reads as interval text with no formatter", () => {
+    const result = buildResultFromArrow(table, [null]);
+    expect(result.text(0, result.columns[0])).toBe("00:03:16");
+    expect(result.text(1, result.columns[0])).toBe("00:03:54.5");
+  });
+});

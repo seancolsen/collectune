@@ -6,8 +6,10 @@
 
 import {
   DataType,
+  IntervalUnit,
   tableFromIPC,
   type DataType as ArrowType,
+  type Vector,
 } from "apache-arrow";
 import { postQuery } from "api-client";
 
@@ -38,6 +40,92 @@ export async function runSqlScalar(sql: string): Promise<string> {
  * it returns false the caller must still fall back to {@link isListLikeValue}. */
 export function isListType(type: ArrowType): boolean {
   return DataType.isList(type);
+}
+
+/** Whether `type` is the interval flavor DuckDB sends — the one apache-arrow
+ * cannot decode (see {@link readMonthDayNanoInterval}). */
+export function isMonthDayNanoInterval(type: ArrowType | undefined): boolean {
+  return (
+    type !== undefined &&
+    DataType.isInterval(type) &&
+    type.unit === IntervalUnit.MONTH_DAY_NANO
+  );
+}
+
+/** Bytes per `Interval(MONTH_DAY_NANO)` value: int32 months, int32 days, int64
+ * nanoseconds, little-endian. */
+const INTERVAL_BYTES = 16;
+
+const NS_PER_SECOND = 1_000_000_000n;
+
+/** Reads one `Interval(MONTH_DAY_NANO)` cell straight out of the column's
+ * buffer, as DuckDB's own interval text (`"00:03:42.25"`). `null` for a NULL
+ * cell.
+ *
+ * NOTE: another apache-arrow (18.x) gap, in the same spirit as {@link isListType}
+ * above, but a silent one. MONTH_DAY_NANO is the only interval flavor DuckDB
+ * emits and the only one apache-arrow's getter has no branch for: it falls
+ * through to the YEAR_MONTH branch, which reads a *single* int32 where the value
+ * is 16 bytes wide. Nothing throws — a 3m42.25s duration just decodes to the
+ * `Int32Array` `0,0`, and longer ones to arbitrary garbage. The IPC reader does
+ * store the bytes faithfully, so reading the documented layout here recovers the
+ * value.
+ *
+ * Indexes `values` from zero the way every apache-arrow getter does (`Data`
+ * slicing rebases the buffer, so `data.offset` is not applied on read). */
+export function readMonthDayNanoInterval(
+  vector: Vector,
+  row: number,
+): string | null {
+  if (!vector.isValid(row)) return null;
+  let index = row;
+  for (const data of vector.data) {
+    if (index >= data.length) {
+      index -= data.length;
+      continue;
+    }
+    const values = data.values as unknown as ArrayBufferView;
+    const at = INTERVAL_BYTES * index;
+    if (at + INTERVAL_BYTES > values.byteLength) return null;
+    const view = new DataView(
+      values.buffer,
+      values.byteOffset,
+      values.byteLength,
+    );
+    return formatInterval(
+      view.getInt32(at, true),
+      view.getInt32(at + 4, true),
+      view.getBigInt64(at + 8, true),
+    );
+  }
+  return null;
+}
+
+/** Renders an interval's three components the way DuckDB prints them: the month
+ * and day parts only when they carry something, then `HH:MM:SS[.fff]` for the
+ * time. A pure duration — every interval this app stores — is just the time
+ * part, which is what the `duration` formatter then reads. */
+function formatInterval(months: number, days: number, nanos: bigint): string {
+  const parts: string[] = [];
+  if (months !== 0) parts.push(`${months} month${months === 1 ? "" : "s"}`);
+  if (days !== 0) parts.push(`${days} day${days === 1 ? "" : "s"}`);
+  if (nanos !== 0n || parts.length === 0) parts.push(formatIntervalTime(nanos));
+  return parts.join(" ");
+}
+
+/** `HH:MM:SS[.fff]` for a nanosecond count, with the fraction trimmed of
+ * trailing zeros and hours allowed past 24 (an interval is a span, not a clock
+ * reading). */
+function formatIntervalTime(nanos: bigint): string {
+  const sign = nanos < 0n ? "-" : "";
+  const abs = nanos < 0n ? -nanos : nanos;
+  const seconds = abs / NS_PER_SECOND;
+  const pad = (n: bigint) => String(n).padStart(2, "0");
+  const hms = `${pad(seconds / 3600n)}:${pad((seconds / 60n) % 60n)}:${pad(seconds % 60n)}`;
+  const fraction = String(abs % NS_PER_SECOND)
+    .padStart(9, "0")
+    .replace(/0+$/, "");
+  return `${sign}${hms}${fraction === "" ? "" : `.${fraction}`}`;
 }
 
 /** Whether a decoded cell value is list-like (an Arrow sub-vector / array), used

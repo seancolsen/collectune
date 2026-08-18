@@ -415,8 +415,9 @@ export const STORIES: Record<string, Story> = {
   // expanded into its own form.
   "record-editor/items-expanded": recordEditor([3]),
   // Mid-edit: an edited field and a record being created under `credit`, each
-  // starred.
-  "record-editor/modified": recordEditor([3]),
+  // starred. On track 5, whose title is short — track 3's is the long one the
+  // expansion story is about, and this story wants a plain single-line edit.
+  "record-editor/modified": recordEditor([5]),
   // A save the database refused: what it said, above a form still holding the
   // change it couldn't write.
   "record-editor/save-error": recordEditor(

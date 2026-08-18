@@ -49,6 +49,25 @@ describe("Duration formatter", () => {
     expect(formatValue(f, "3600")).toBe("60:00");
     expect(formatValue(f, "nope")).toBeNull();
   });
+
+  // `file.duration` and the `track.*_position` columns are INTERVALs as of
+  // migration 0003, so a duration cell now usually arrives as the interval text
+  // `api/query.ts` reads out of the Arrow buffer rather than as bare seconds.
+  it("formats an INTERVAL cell's text as well as bare seconds", () => {
+    const f: Formatter = { type: "duration" };
+    expect(formatValue(f, "00:03:42.25")).toBe("3:42");
+    expect(formatValue(f, "00:00:00")).toBe("0:00");
+    expect(formatValue(f, "01:02:05")).toBe("62:05");
+    expect(formatValue(f, "-00:01:30")).toBe("-1:30");
+    expect(formatValue(f, "2 days 00:01:30")).toBe("2881:30");
+    expect(formatValue(f, "1 day -00:00:30")).toBe("1439:30");
+  });
+
+  // A month is not a fixed number of seconds, so an interval carrying one is
+  // not a duration: the formatter declines it and the caller shows it raw.
+  it("declines an interval with a month component", () => {
+    expect(formatValue({ type: "duration" }, "14 months")).toBeNull();
+  });
 });
 
 describe("Timestamp formatter", () => {

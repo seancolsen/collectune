@@ -72,8 +72,9 @@ test("switching the base keeps the filter and reseeds the rest from the new tabl
   await page.getByRole("button", { name: "Query actions" }).click();
   await page.getByRole("menuitem", { name: "Base" }).click();
   // The query's own base is checked; the tables come from the schema.
+  // `exact` so this picks `track`, not the `track_tag` beside it.
   await expect(
-    page.getByRole("menuitemradio", { name: "track" }),
+    page.getByRole("menuitemradio", { name: "track", exact: true }),
   ).toHaveAttribute("aria-checked", "true");
   await page.getByRole("menuitemradio", { name: "album" }).click();
 
@@ -106,7 +107,7 @@ test("Full Querydown flattens the query into one editable field", async ({
   await expect(page.getByRole("button", { name: "Filter" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Querydown" })).toBeVisible();
   await expect(page.getByPlaceholder("Querydown")).toHaveValue(
-    "#track\njazz playcount:<100\nrating:>=4 !genre:duplicate file.deletion:@null",
+    "#track\njazz playcount:<100\nrating.value:>=4 !++#tag{name:duplicate} file.deletion:@null",
   );
 
   // Editing it writes back to the working definition…
@@ -116,7 +117,7 @@ test("Full Querydown flattens the query into one editable field", async ({
   // …and picking a base table again drops back to the builder.
   await page.getByRole("button", { name: "Query actions" }).click();
   await page.getByRole("menuitem", { name: "Base" }).click();
-  await page.getByRole("menuitemradio", { name: "track" }).click();
+  await page.getByRole("menuitemradio", { name: "track", exact: true }).click();
   expect(await liveDefinition(page)).toEqual({
     base: "track",
     filter: { custom: "jazz playcount:<100", presets: [] },

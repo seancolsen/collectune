@@ -3,9 +3,11 @@
 // needs from one: an introspection document (its whole structure comes from
 // there) and answers to the Querydown queries it builds (its data).
 //
-// The schema is RadioCrate's own (`backend/src/migrations/0001.sql`), and the
-// rows continue the seeded "Lemonade" grid: `?records=track,album` gives its
-// rows the keys `track-1` … `track-5`, which is what the ids below are.
+// The schema is RadioCrate's own, as the migrations leave it
+// (`backend/src/migrations/`), trimmed to the tables and columns the form has
+// something to show for. The rows continue the seeded "Lemonade" grid:
+// `?records=track,album` gives its rows the keys `track-1` … `track-5`, which is
+// what the ids below are.
 //
 // The fake query runner interprets only the shapes `query/recordForm.ts` and
 // `query/embeddedRecord.ts` generate — `col:="value"` conditions, `[{…} {…}]`
@@ -58,8 +60,10 @@ export const FIXTURE_SCHEMA_JSON = addInferredLinks(
         [
           ["track", "UUID"],
           ["artist", "UUID"],
-          ["ord", "FLOAT", true],
-          ["role", "VARCHAR", true],
+          ["order", "FLOAT", true],
+          // Dropped and re-added as a link by migration 0003, which is why it
+          // trails the columns it used to sit among.
+          ["role", "UUID", true],
         ],
         [["track", "artist"]],
       ),
@@ -70,7 +74,7 @@ export const FIXTURE_SCHEMA_JSON = addInferredLinks(
           ["path", "VARCHAR"],
           ["size", "UINTEGER"],
           ["format", "format"],
-          ["duration", "FLOAT"],
+          ["duration", "INTERVAL"],
           ["added", "TIMESTAMP"],
         ],
         [["id"], ["path"]],
@@ -84,6 +88,30 @@ export const FIXTURE_SCHEMA_JSON = addInferredLinks(
         [["track", "timestamp"]],
       ),
       T(
+        "rating",
+        [
+          ["id", "UUID"],
+          ["value", "FLOAT"],
+        ],
+        [["id"], ["value"]],
+      ),
+      T(
+        "role",
+        [
+          ["id", "UUID"],
+          ["name", "VARCHAR"],
+        ],
+        [["id"], ["name"]],
+      ),
+      T(
+        "tag",
+        [
+          ["id", "UUID"],
+          ["name", "VARCHAR"],
+        ],
+        [["id"], ["name"]],
+      ),
+      T(
         "track",
         [
           ["id", "UUID"],
@@ -92,10 +120,17 @@ export const FIXTURE_SCHEMA_JSON = addInferredLinks(
           ["album", "UUID", true],
           ["disc_number", "UTINYINT", true],
           ["track_number", "UTINYINT", true],
-          ["genre", "VARCHAR", true],
-          ["rating", "FLOAT", true],
+          ["rating", "UUID", true],
         ],
         [["id"]],
+      ),
+      T(
+        "track_tag",
+        [
+          ["track", "UUID"],
+          ["tag", "UUID"],
+        ],
+        [["track", "tag"]],
       ),
     ],
     links: [],
@@ -113,10 +148,16 @@ const TITLES = [
   "6 Inch",
 ];
 
-/** A genre long enough to overflow the sidebar's width, so the expandable-text
- * behavior has something to expand. */
-const GENRE =
-  "R&B / neo soul, with detours through rock, country and reggae — the\nrecord's whole point is that it doesn't sit still.";
+/** A title long enough to overflow the sidebar's width — and carrying a
+ * linebreak, which makes a value expandable whatever its width — so the
+ * expandable-text behavior has something to expand.
+ *
+ * It lives on `title` because that is the only free text `track` has left: the
+ * long value used to be `genre`, which migration 0003 replaced with the `tag`
+ * table. A track whose title runs this long is not a contrivance — a live
+ * recording that names its medley is exactly this shape. */
+const LONG_TITLE =
+  'Don\'t Hurt Yourself — Live at the Superdome, with the full horn\nsection, running into a reprise of "Ring the Alarm" nobody had rehearsed.';
 
 const TABLE_ROWS: Record<string, Row[]> = {
   // One album per grid row, so a row's `album-N` key (from `?records=`) resolves
@@ -136,31 +177,55 @@ const TABLE_ROWS: Record<string, Row[]> = {
     path: `./Beyoncé/Lemonade/Beyoncé - ${i + 1} - ${title}.flac`,
     size: `${34_000_000 + i * 1_000_000}`,
     format: "flac",
-    duration: ["196", "221", "234", "233", "260"][i],
+    duration: ["00:03:16", "00:03:41", "00:03:54", "00:03:53", "00:04:20"][i],
     added: "2016-04-23 19:04:00",
   })),
+  // Ratings and roles are shared values as of migration 0003: a handful of
+  // records the tracks and credits point at, rather than a number and a string
+  // repeated down each column.
+  rating: [
+    { id: "rating-35", value: "3.5" },
+    { id: "rating-4", value: "4" },
+    { id: "rating-45", value: "4.5" },
+  ],
+  role: [{ id: "role-featured", name: "Featured" }],
+  tag: [
+    { id: "tag-rnb", name: "R&B" },
+    { id: "tag-neo-soul", name: "Neo soul" },
+    { id: "tag-rock", name: "Rock" },
+    { id: "tag-trap-soul", name: "Trap soul" },
+  ],
   track: TITLES.map((title, i) => ({
     id: `track-${i + 1}`,
     file: `file-${i + 1}`,
-    title,
+    // The third track's title is the long one, so the expandable-text behavior
+    // is reachable on a record that also has credits, plays and tags to show.
+    title: i === 2 ? LONG_TITLE : title,
     // The last track is left unfiled, so a NULL scalar linked record field (and
     // its pencil button) is on screen.
     album: i === 4 ? null : `album-${i + 1}`,
     disc_number: "1",
-    track_number: `${i + 1}`,
-    // Two of them get a genre too long for one line, so the expandable-text
-    // behavior is reachable from a row with credits and one without.
-    genre: i === 0 || i === 2 ? GENRE : "R&B",
-    // The last track is left unrated too, so a NULL *primitive* field (whose
-    // pencil activates a text box, unlike a link's) is on screen beside it.
-    rating: i === 4 ? null : ["3.5", "4", "4", "4", "4.5"][i],
+    // The last track's number is left off, so a NULL *primitive* field — whose
+    // pencil activates a text box, unlike a link's, which opens the record
+    // picker — is on screen beside that NULL `album` link.
+    track_number: i === 4 ? null : `${i + 1}`,
+    rating: ["rating-35", "rating-4", "rating-4", "rating-4", "rating-45"][i],
   })),
+  // Several tags on one track — the thing the old comma-joined `genre` string
+  // could not represent, and the reason `track_tag` exists.
+  track_tag: [
+    { track: "track-1", tag: "tag-rnb" },
+    { track: "track-1", tag: "tag-neo-soul" },
+    { track: "track-3", tag: "tag-rnb" },
+    { track: "track-3", tag: "tag-rock" },
+    { track: "track-5", tag: "tag-trap-soul" },
+  ],
   credit: [
-    { track: "track-1", artist: "artist-1", ord: "1", role: null },
-    { track: "track-3", artist: "artist-1", ord: "1", role: null },
-    { track: "track-3", artist: "artist-2", ord: "2", role: "Featured" },
-    { track: "track-5", artist: "artist-1", ord: "1", role: null },
-    { track: "track-5", artist: "artist-3", ord: "2", role: "Featured" },
+    { track: "track-1", artist: "artist-1", order: "1", role: null },
+    { track: "track-3", artist: "artist-1", order: "1", role: null },
+    { track: "track-3", artist: "artist-2", order: "2", role: "role-featured" },
+    { track: "track-5", artist: "artist-1", order: "1", role: null },
+    { track: "track-5", artist: "artist-3", order: "2", role: "role-featured" },
   ],
   play: [
     { track: "track-1", timestamp: "2016-04-24 08:12:00" },

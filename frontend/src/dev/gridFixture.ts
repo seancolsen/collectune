@@ -22,6 +22,33 @@ function meta(overrides: Partial<ColumnMetadata>): ColumnMetadata {
 const durationFmt: Formatter = { type: "duration" };
 const ratingFmt: Formatter = { type: "number", decimalPlaces: [0, 1] };
 
+/** Builds an `Interval(MONTH_DAY_NANO)` vector holding whole seconds — the type
+ * and byte layout DuckDB sends for an INTERVAL column, which `file.duration`
+ * became in migration 0003.
+ *
+ * Hand-built because apache-arrow has no builder for this interval flavor (it
+ * cannot read one either — see `readMonthDayNanoInterval` in `api/query.ts`).
+ * Laying the bytes down the way arrow-rs writes them is what keeps this fixture
+ * honest: the seeded grid decodes a duration exactly as production does, so the
+ * snapshot would catch a regression in that decode. */
+function intervalColumn(seconds: readonly number[]): arrow.Vector {
+  const buffer = new ArrayBuffer(16 * seconds.length);
+  const view = new DataView(buffer);
+  seconds.forEach((s, i) => {
+    view.setInt32(i * 16, 0, true); // months
+    view.setInt32(i * 16 + 4, 0, true); // days
+    view.setBigInt64(i * 16 + 8, BigInt(s) * 1_000_000_000n, true); // nanoseconds
+  });
+  return new arrow.Vector([
+    arrow.makeData({
+      type: new arrow.Interval(arrow.IntervalUnit.MONTH_DAY_NANO),
+      length: seconds.length,
+      nullCount: 0,
+      data: new Int32Array(buffer),
+    }),
+  ]);
+}
+
 /** Builds a `List<Utf8>` vector from per-row pill arrays — the same shape a
  * DuckDB list column decodes to (see `result.test.ts`, which this mirrors). */
 function listColumn(rows: readonly (readonly string[])[]): arrow.Vector {
@@ -129,7 +156,7 @@ export function lemonadeGridResult(identity: LemonadeIdentity = {}): {
   );
   push(
     "duration",
-    arrow.vectorFromArray([196, 221, 234, 233, 260], new arrow.Int32()),
+    intervalColumn([196, 221, 234, 233, 260]),
     meta({
       min_width: 40,
       max_width: 50,

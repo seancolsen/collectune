@@ -38,10 +38,12 @@ for (const colorScheme of SCHEMES) {
       "record-editor/items-expanded",
       colorScheme,
     );
-    await stage.getByRole("button", { name: "Expand genre" }).click();
+    await stage.getByRole("button", { name: "Expand title" }).click();
     await stage.getByRole("button", { name: "Expand credit" }).click();
-    await stage.getByRole("button", { name: "Expand Jack White" }).click();
-    await expect(stage.getByText("Featured")).toBeVisible();
+    await stage.getByRole("button", { name: /^Expand Jack White/ }).click();
+    // "Featured" is on screen twice by now — in the credit's own preview and in
+    // the form it just opened — so this waits on the form's copy.
+    await expect(stage.getByText("Featured").last()).toBeVisible();
     await expect(stage).toHaveScreenshot(
       snapshot("record-editor/items-expanded", colorScheme),
     );
@@ -51,8 +53,8 @@ for (const colorScheme of SCHEMES) {
   // starred, and the "+" buttons that put it there.
   test(`record-editor/modified - ${colorScheme}`, async ({ page }) => {
     const stage = await openStory(page, "record-editor/modified", colorScheme);
-    await stage.getByText("Don't Hurt Yourself", { exact: true }).click();
-    await stage.getByRole("textbox").fill("Don't Hurt Yourself (Live)");
+    await stage.getByText("6 Inch", { exact: true }).click();
+    await stage.getByRole("textbox").fill("6 Inch (Live)");
     await page.keyboard.press("Escape");
     await stage.getByRole("button", { name: "Add credit" }).click();
     await expect(stage.locator("[data-selectable]").first()).toHaveText("New");
@@ -87,10 +89,12 @@ for (const colorScheme of SCHEMES) {
   test(`record-editor/bulk - ${colorScheme}`, async ({ page }) => {
     const stage = await openStory(page, "record-editor/bulk", colorScheme);
     await expect(stage.getByRole("heading")).toHaveText("Edit 2 track records");
-    // Both records' data has landed once the counts they share have.
+    // Both records' data has landed once the counts they share have — one per
+    // multi-record field, of which `track` has three (`credit`, `play` and, as
+    // of migration 0003, `track_tag`).
     await expect(
       stage.getByText("Bulk modification not yet supported"),
-    ).toHaveCount(2);
+    ).toHaveCount(3);
     await expect(stage).toHaveScreenshot(
       snapshot("record-editor/bulk", colorScheme),
     );

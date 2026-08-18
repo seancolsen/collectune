@@ -16,7 +16,13 @@
 import * as arrow from "apache-arrow";
 import type { DataType as ArrowType, Table } from "apache-arrow";
 import type { AnnotationValue } from "querydown-js";
-import { isListLikeValue, isListType, stringifyArrowValue } from "../api/query";
+import {
+  isListLikeValue,
+  isListType,
+  isMonthDayNanoInterval,
+  readMonthDayNanoInterval,
+  stringifyArrowValue,
+} from "../api/query";
 import {
   columnMetadataFromAnnotation,
   defaultColumnMetadata,
@@ -65,12 +71,19 @@ export class QueryResult {
   }
 
   /** The raw value in a cell, as Arrow gives it — what a key or a track id is
-   * read from. `null`/`undefined` for a NULL cell. */
+   * read from. `null`/`undefined` for a NULL cell.
+   *
+   * Interval columns are the one exception to "as Arrow gives it": apache-arrow
+   * decodes them to garbage, so they come back as text read from the buffer
+   * directly (see {@link readMonthDayNanoInterval}). */
   value(row: number, column: number): unknown {
     const patch = this.patches.get(row);
-    return patch
-      ? patch.table.getChildAt(column)?.get(patch.row)
-      : this.table.getChildAt(column)?.get(row);
+    const vector = (patch ? patch.table : this.table).getChildAt(column);
+    if (!vector) return undefined;
+    const index = patch ? patch.row : row;
+    return isMonthDayNanoInterval(this.types[column])
+      ? readMonthDayNanoInterval(vector, index)
+      : vector.get(index);
   }
 
   /** The raw value's plain string form — no formatter, prefix or suffix — what
@@ -136,8 +149,12 @@ function buildResult(
     // first non-null value, since apache-arrow 18 can't classify some DuckDB
     // list types (see `isListType`). Without this, a list column decodes down
     // the scalar path and renders as bracketed text instead of pills.
+    //
+    // Interval columns are exempt from the value-level fallback: apache-arrow
+    // decodes them to an `Int32Array`, which is iterable and so reads as
+    // list-like, and a duration would render as a row of pills of nonsense.
     let isList = isListType(field.type);
-    if (!isList) {
+    if (!isList && !isMonthDayNanoInterval(field.type)) {
       const vector = table.getChildAt(i);
       if (vector) {
         for (let r = 0; r < rowCount; r++) {
