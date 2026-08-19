@@ -18,11 +18,16 @@ ARG USER_GID=1000
 
 # System packages + Node.js 20 (for Claude Code and Playwright's CLI; the
 # SolidJS frontend itself runs on Bun, installed further below).
+#
+# ffmpeg is here for sample-data/audio/generator, which synthesizes speech to
+# WAV and shells out to ffmpeg to convert it. The realistic generator next to it
+# needs no such thing — it encodes FLAC through a Python wheel.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         git \
         curl \
         ca-certificates \
+        ffmpeg \
         pkg-config \
         cmake \
         sudo \
@@ -78,6 +83,23 @@ RUN DUCKDB_VERSION="v1.5.4" \
     && rm /tmp/duckdb.zip \
     && chmod +x /usr/local/bin/duckdb
 
+# uv — the runner for the sample-data generator scripts (see sample-data/).
+# Each of those is a uv single-file script that declares its own dependencies
+# and Python version inline, so uv is the only thing that has to be installed;
+# it resolves the rest on first run (which therefore needs network).
+#
+# Installed to a shared prefix and symlinked onto PATH for the same reason Bun
+# is, and pointed at a shared directory for the Python versions it manages, so
+# that the interpreter is found no matter which user runs a script rather than
+# being re-downloaded into each one's home. 3.12 is baked in because that is
+# what the scripts pin.
+ENV UV_INSTALL_DIR=/usr/local/uv/bin \
+    UV_PYTHON_INSTALL_DIR=/usr/local/uv/python
+RUN curl -LsSf https://astral.sh/uv/install.sh | env INSTALLER_NO_MODIFY_PATH=1 sh \
+    && ln -s "${UV_INSTALL_DIR}/uv" /usr/local/bin/uv \
+    && ln -s "${UV_INSTALL_DIR}/uvx" /usr/local/bin/uvx \
+    && uv python install 3.12
+
 # Ensure cargo is on PATH for login shells too (the base image's ENV PATH is
 # otherwise reset by /etc/profile in a `bash -l` context).
 RUN echo 'export PATH=/usr/local/cargo/bin:$PATH' > /etc/profile.d/cargo.sh
@@ -89,7 +111,7 @@ RUN groupadd --gid "${USER_GID}" "${USERNAME}" 2>/dev/null || true \
     && echo "${USERNAME} ALL=(ALL) NOPASSWD:ALL" > "/etc/sudoers.d/${USERNAME}" \
     && chmod 0440 "/etc/sudoers.d/${USERNAME}" \
     && mkdir -p /workspace /usr/local/cargo/registry /usr/local/cargo/git \
-    && chown -R "${USER_UID}:${USER_GID}" /workspace /usr/local/cargo /usr/local/rustup
+    && chown -R "${USER_UID}:${USER_GID}" /workspace /usr/local/cargo /usr/local/rustup /usr/local/uv
 
 COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
