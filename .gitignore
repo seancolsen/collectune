@@ -39,3 +39,7 @@ backend/target/
 # Python bytecode cache.
 __pycache__/
 *.pyc
+
+# The database the backend creates in whichever collection root it is pointed at,
+# including the sample collections under sample-data/.
+radiocrate.db
