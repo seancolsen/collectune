@@ -51,7 +51,7 @@ never rebuild it while working on the UI — leave it running.
 ```sh
 # From the repo root. Point it at any collection of audio files.
 # --no-scan skips the startup collection scan for a faster boot.
-cargo run -p backend -- /path/to/your/collection --no-scan
+cargo run -p backend -- serve /path/to/your/collection --no-scan
 # → Listening on 0.0.0.0:3000
 ```
 
@@ -60,7 +60,7 @@ Use a release build if you want realistic query performance (debug DuckDB is
 
 ```sh
 cargo build --release -p backend
-./target/release/radiocrate-server /path/to/your/collection --no-scan
+./target/release/radiocrate-server serve /path/to/your/collection --no-scan
 ```
 
 ### 2. Start the Vite dev server (terminal 2)

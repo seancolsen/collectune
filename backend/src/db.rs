@@ -1,5 +1,8 @@
-use duckdb::Connection;
 use std::path::{Path, PathBuf};
+
+/// Re-exported so a binary can name the type `get_db` hands back without taking
+/// its own dependency on `duckdb`.
+pub use duckdb::Connection;
 
 static DB_FILE_NAME: &str = "radiocrate.db";
 

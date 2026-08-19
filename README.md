@@ -18,13 +18,18 @@ Build artifacts are split into two binaries so the UI can iterate without rebuil
 ### Run the API server
 
 ```sh
-cargo run -p backend -- /path/to/music
+cargo run -p backend -- serve /path/to/music
 ```
 
 Options:
 
 - `--port <PORT>` (default `3000`)
 - `--no-scan` — skip the full collection scan on startup
+- `--db-path <PATH>` (default `radiocrate.db` in the collection root)
+
+To scan a collection into its database without serving anything, use `scan` in
+place of `serve`. It takes the collection path and `--db-path`, and exits when
+the scan finishes.
 
 ### Run the new SolidJS frontend (dev)
 
@@ -68,10 +73,11 @@ The resulting binary is at `target/release/radiocrate`.
 ### Run
 
 ```sh
-./target/release/radiocrate /path/to/music
+./target/release/radiocrate serve /path/to/music
 ```
 
-Options match the dev API server (`--port`, `--no-scan`). The web UI is served at `http://localhost:<port>/`; the API at `http://localhost:<port>/api/*`.
+Subcommands and options match the dev API server (`serve` / `scan`, `--port`,
+`--no-scan`, `--db-path`). The web UI is served at `http://localhost:<port>/`; the API at `http://localhost:<port>/api/*`.
 
 ### Clean the frontend build
 

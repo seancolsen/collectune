@@ -2,7 +2,7 @@ use axum::Router;
 use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
 use backend::{db, scanner, server};
-use clap::Parser;
+use clap::{Args, Parser, Subcommand};
 use rust_embed::Embed;
 use std::path::{Path, PathBuf};
 
@@ -18,17 +18,46 @@ const VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), " (", env!("GIT_HASH"),
 #[command(name = "radiocrate")]
 #[command(about = "RadioCrate — manage and play your audio collection")]
 #[command(version = VERSION)]
-struct Args {
+struct Cli {
+    #[command(subcommand)]
+    command: Command,
+}
+
+#[derive(Subcommand)]
+enum Command {
+    /// Scan a collection into its database, then exit
+    Scan(ScanArgs),
+
+    /// Serve the web UI and API for a collection
+    Serve(ServeArgs),
+}
+
+/// What every subcommand needs to know: which collection, and where its
+/// database lives.
+#[derive(Args)]
+struct CollectionArgs {
     /// Path to the collection of audio files
     collection_path: String,
-
-    /// Start without running a full collection scan
-    #[arg(long)]
-    no_scan: bool,
 
     /// Path to the database file (defaults to `radiocrate.db` in the collection root)
     #[arg(long)]
     db_path: Option<PathBuf>,
+}
+
+#[derive(Args)]
+struct ScanArgs {
+    #[command(flatten)]
+    collection: CollectionArgs,
+}
+
+#[derive(Args)]
+struct ServeArgs {
+    #[command(flatten)]
+    collection: CollectionArgs,
+
+    /// Start without running a full collection scan
+    #[arg(long)]
+    no_scan: bool,
 
     /// Port to listen on
     #[arg(short, long, default_value_t = 3000)]
@@ -44,6 +73,19 @@ fn get_collection_path(path_str: &str) -> Result<&Path, String> {
         return Err(format!("The path '{path_str}' is not a directory."));
     }
     Ok(path)
+}
+
+/// Resolves the collection path and opens its database, migrating it if needed.
+fn open_collection(
+    args: &CollectionArgs,
+) -> Result<(&Path, db::Connection), Box<dyn std::error::Error>> {
+    let collection_path = get_collection_path(&args.collection_path)?;
+    let db_path = args
+        .db_path
+        .clone()
+        .unwrap_or_else(|| db::default_db_path(collection_path));
+    let conn = db::get_db(&db_path)?;
+    Ok((collection_path, conn))
 }
 
 /// The content type to serve `path` as.
@@ -146,14 +188,9 @@ async fn static_handler(uri: Uri) -> Response {
     (headers, file.data).into_response()
 }
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let args = Args::parse();
-    let collection_path = get_collection_path(&args.collection_path)?;
-    let db_path = args
-        .db_path
-        .unwrap_or_else(|| db::default_db_path(collection_path));
-    let conn = db::get_db(&db_path)?;
+/// Serves the API and the embedded frontend for a collection.
+async fn serve(args: ServeArgs) -> Result<(), Box<dyn std::error::Error>> {
+    let (collection_path, conn) = open_collection(&args.collection)?;
     if !args.no_scan {
         scanner::scan(collection_path, &conn)?;
     }
@@ -172,5 +209,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Listening on {addr}");
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     axum::serve(listener, app).await?;
+    Ok(())
+}
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    match Cli::parse().command {
+        Command::Scan(args) => {
+            let (collection_path, conn) = open_collection(&args.collection)?;
+            scanner::scan(collection_path, &conn)?;
+        }
+        Command::Serve(args) => serve(args).await?,
+    }
     Ok(())
 }
