@@ -3,6 +3,8 @@
 -- Three columns that held a bare value inline (`credit.role`, `track.rating`)
 -- or a delimited list of them (`track.genre`) become links to tables of shared
 -- values, so a value can be renamed in one place and referenced from many rows.
+-- `track.rating` joins them, but points at a fixed set of standard ratings
+-- rather than at whatever numbers the old column happened to hold.
 -- The `duration` and `*_position` columns move from a bare count of seconds to
 -- DuckDB's INTERVAL, so the unit lives in the type rather than in convention.
 --
@@ -19,11 +21,11 @@
 -- read, their columns swapped, and the new columns backfilled, every read comes
 -- first, then every schema change, then every backfill.
 
--- === Phase 1: lift the old inline values into their own tables ==============
+-- === Phase 1: build the value tables and map the old values onto them =======
 --
 -- The scratch tables carry each row's key alongside the id of the shared value
 -- it should end up pointing at, so the mapping survives dropping the column that
--- currently holds it.
+-- currently holds it. A row missing from a scratch table keeps a NULL link.
 
 create table role (
   id uuid primary key,
@@ -41,21 +43,36 @@ select c.track, c.artist, r.id as role
 from credit c
 join role r on r.name = c.role;
 
+-- Ratings are the exception: rather than lifting whatever values happen to be
+-- in the column, the table is seeded with a fixed set of four standard ratings,
+-- and the old free-floating numbers are bucketed onto them. The old column held
+-- a 0-to-5 score imported from file metadata, where 0 meant "unrated" and the
+-- interesting distinctions all sat in the top point of the range. The ids are
+-- hardcoded so that every library agrees on them.
+
 create table rating (
   id uuid primary key,
-  value float unique not null
+  value float unique not null,
+  symbol text unique,
+  description text
 );
 
-insert into rating (id, value)
-select uuid(), rating
-from track
-where rating is not null
-group by rating;
+insert into rating (id, value, symbol, description) values
+('ed9a010a-124b-4aee-bce4-4889875142e8', 1, '🗑️', 'Skip'),
+('ddd714b8-2d6a-4ff0-b280-74d8472116a7', 2, '✔️', 'Like'),
+('7f592dd0-be55-4ef8-a946-1a11cd0d03b5', 3, '❤️', 'Love'),
+('3e056915-37fc-4660-8db5-06c15572591a', 4, '🏆', 'Best');
 
 create table migration_0003_track_rating as
 select t.id as track, r.id as rating
 from track t
-join rating r on r.value = t.rating;
+join rating r on r.value = case
+  when t.rating >= 5 then 4
+  when t.rating >= 4.5 then 3
+  when t.rating >= 4 then 2
+  else 1
+end
+where t.rating is not null and t.rating <> 0;
 
 -- Tags replace `track.genre`, which held one comma-joined string per track and
 -- so could not represent a track's genres as separate values. Nothing is lifted
