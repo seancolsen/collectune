@@ -32,18 +32,15 @@ import soundfile as sf
 import yaml
 from mutagen.flac import FLAC
 
-SCRIPT_DIR = Path(__file__).parent
+from layout import relative_path
+
+SCRIPT_DIR = Path(__file__).resolve().parent
 DEFINITION = SCRIPT_DIR / "collection.yaml"
 COLLECTION_DIR = SCRIPT_DIR.parent / "collection"
 
 # Silence is written a chunk at a time so that an eight-minute track never has
 # to exist in memory as a whole array of samples.
 CHUNK_SECONDS = 30
-
-# Characters that would otherwise steer a title out of its album's directory.
-# Everything else in a title is left alone — the collection is meant to exercise
-# the app's handling of real-world names, punctuation and all.
-PATH_SUBSTITUTIONS = str.maketrans({"/": "-", "\\": "-"})
 
 
 def parse_duration(text: str) -> int:
@@ -54,13 +51,7 @@ def parse_duration(text: str) -> int:
 
 def track_path(template: str, album: dict, track: dict) -> Path:
     """Resolve a track's location under the collection root."""
-    relative = template.format(
-        album_artist=album["album_artist"].translate(PATH_SUBSTITUTIONS),
-        album=album["title"].translate(PATH_SUBSTITUTIONS),
-        track_number=track["number"],
-        title=track["title"].translate(PATH_SUBSTITUTIONS),
-    )
-    return COLLECTION_DIR / relative
+    return COLLECTION_DIR / relative_path(template, album, track)
 
 
 def write_silence(path: Path, seconds: int, audio: dict) -> None:

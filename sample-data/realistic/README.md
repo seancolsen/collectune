@@ -27,45 +27,72 @@ because FLAC stores a long run of identical samples in almost no space at all.
   play log per track) that belongs in the database rather than in a file's tags.
   Its header comments explain each field.
 - `generator/generate_collection.py` — turns the definition into FLAC files.
-- `collection/` — the generated files, committed so that using them needs no
-  tooling at all.
+- `generator/generate_database.py` — scans those files with RadioCrate's own
+  scanner, then imports the ratings and play logs.
+- `generator/generate_all.py` — both of the above, in order.
+- `generator/layout.py` — the one rule for where a track's file goes, shared by
+  the two generators so the import can find what the writer wrote.
+- `collection/` — the generated files. The FLACs are committed, so using them
+  needs no tooling at all; `radiocrate.db` is not (see below).
 
-## Regenerating the files
+## Regenerating
 
-The generated files are checked in, so this is only needed after editing
-`collection.yaml` — adding a track, fixing a duration, correcting a tag.
+All three scripts are [uv](https://docs.astral.sh/uv/) single-file scripts: each
+declares its own dependencies and Python version inline, and uv fetches both on
+first run. With [uv installed](https://docs.astral.sh/uv/getting-started/installation/)
+— the dev container has it — nothing else needs setting up. Run one directly, or
+equivalently as `uv run <script>`:
 
-The script is a [uv](https://docs.astral.sh/uv/) single-file script: it declares
-its own dependencies and Python version inline, and uv fetches both on first
-run. With [uv installed](https://docs.astral.sh/uv/getting-started/installation/),
-nothing else needs setting up:
+```sh
+./sample-data/realistic/generator/generate_all.py
+```
+
+### Just the audio files
 
 ```sh
 ./sample-data/realistic/generator/generate_collection.py
 ```
 
-or, equivalently:
+The files are checked in, so this is only needed after editing `collection.yaml`
+— adding a track, fixing a duration, correcting a tag. It rebuilds `collection/`
+from scratch, so a track dropped or renamed in the definition leaves no stale
+file behind, and it takes well under a minute. Commit the result alongside the
+change to `collection.yaml`.
+
+Ratings and play logs are deliberately *not* written into the files. They aren't
+file metadata; they're the user's own data, and only the database holds them.
+
+### Just the database
 
 ```sh
-uv run sample-data/realistic/generator/generate_collection.py
+./sample-data/realistic/generator/generate_database.py
 ```
 
-It rebuilds `collection/` from scratch — a track dropped or renamed in the
-definition leaves no stale file behind — and takes well under a minute. Commit
-the result alongside the change to `collection.yaml`.
+This builds `collection/radiocrate.db` in two steps. First it runs the real
+scanner — `cargo run -p backend -- scan …`, so the first run compiles the
+backend — which means everything the app derives from a file arrives exactly as
+it would from a real collection, and a broken scanner shows up here. Then it
+opens the fresh database and imports what no file can carry: each track's rating
+and play log, joined to the scanned rows on file path.
 
-Note that ratings and play logs are deliberately *not* written into the files.
-They aren't file metadata; they're the user's own data, and they're loaded into
-the database separately.
+The database is **not committed**, and is gitignored. It is full of freshly
+minted UUIDs and scan timestamps, so no two runs produce the same bytes — and
+the definition stores play times as *days before generation*, which makes
+re-running this the very thing that keeps the listening history looking current.
+Rebuild it whenever the history has drifted, or after a schema migration.
+
+The import fails loudly rather than quietly under-filling the database: if a
+track in the definition doesn't match a scanned file, or the final counts don't
+match what the definition asked for, it says so and exits non-zero.
 
 ## Using the collection
 
-Point the server at it like any other music directory:
+Once the database exists, point the server at the collection and skip the
+startup scan:
 
 ```sh
-cargo run -p backend -- sample-data/realistic/collection --db-path /tmp/sample.db
+cargo run -p backend -- serve sample-data/realistic/collection --no-scan
 ```
 
-`--db-path` is worth passing: without it the database is created as
-`radiocrate.db` *inside* the collection directory, in the middle of the
-committed files. (It's gitignored either way.)
+Without `--db-path`, the server uses `collection/radiocrate.db` — exactly what
+the generator built.
