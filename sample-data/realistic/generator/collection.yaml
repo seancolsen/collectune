@@ -60,14 +60,11 @@ audio:
 # Where each track's file lands, relative to the collection root.
 path_template: "{album_artist} - {album}/{track_number:02d}. {title}.flac"
 
-# The preset ratings, keyed by the `rating` value used on tracks below. The
-# numbers are the `rating.value` column seeded in backend/src/migrations/0003.sql
-# — the generator resolves a key to the rating row holding that value.
 ratings:
-  skip: 1  # 🗑️
-  like: 2  # ✔️
-  love: 3  # ❤️
-  best: 4  # 🏆
+  skip: 1
+  like: 2
+  prefer: 3
+  love: 4
 
 albums:
   - title: "Sgt. Pepper’s Lonely Hearts Club Band"
@@ -82,7 +79,7 @@ albums:
       - number: 1
         title: "Sgt. Pepper’s Lonely Hearts Club Band"
         duration: "2:02"
-        rating: love
+        rating: prefer
         plays: [
           0.1017, 0.5675, 1.8391, 4.5239, 4.7100, 6.2231, 11.9794, 19.7541, 21.1075, 21.9671,
           29.3959, 36.7399, 37.4754, 53.9166, 67.0467, 70.3005, 80.8081, 85.1107, 96.6516,
@@ -95,7 +92,7 @@ albums:
       - number: 2
         title: "With a Little Help From My Friends"
         duration: "2:44"
-        rating: best
+        rating: love
         plays: [
           0.0788, 0.1220, 0.5661, 1.0573, 1.8377, 2.6349, 4.7085, 6.9823, 9.8793, 11.9780,
           12.6111, 21.1060, 22.6796, 24.7190, 25.1138, 29.3945, 37.0976, 37.4739, 41.2765,
@@ -110,7 +107,7 @@ albums:
       - number: 3
         title: "Lucy in the Sky With Diamonds"
         duration: "3:28"
-        rating: best
+        rating: love
         plays: [
           0.0238, 0.0828, 0.5641, 1.8358, 2.3803, 3.0085, 4.3661, 4.7067, 11.4682, 11.6838,
           11.9760, 14.0841, 19.4519, 21.1041, 26.6752, 28.5040, 29.3925, 37.4719, 39.4315,
@@ -149,7 +146,7 @@ albums:
       - number: 6
         title: "She’s Leaving Home"
         duration: "3:35"
-        rating: love
+        rating: prefer
         plays: [
           0.3264, 0.5577, 0.7752, 1.8294, 4.7004, 11.9697, 19.0753, 21.0978, 29.3862, 37.4657,
           42.5916, 51.9721, 53.9089, 67.0369, 70.2907, 79.7314, 81.1220, 103.4231, 106.7453,
@@ -184,7 +181,7 @@ albums:
         title: "When I’m Sixty‐Four"
         duration: "2:38"
         genres: ["Rock", "Music Hall"]
-        rating: love
+        rating: prefer
         plays: [
           0.5497, 1.8214, 4.6975, 6.4800, 11.1865, 11.9617, 21.0898, 29.3782, 41.9025, 53.9009,
           58.9308, 65.4665, 70.0502, 70.2827, 98.3962, 111.6658, 114.2879, 131.1521, 134.9750,
@@ -225,7 +222,7 @@ albums:
       - number: 13
         title: "A Day in the Life"
         duration: "5:34"
-        rating: best
+        rating: love
         plays: [
           0.0015, 0.3066, 0.5432, 4.6915, 5.0876, 7.0417, 7.5560, 13.0011, 16.7321, 21.0832,
           29.3715, 30.3841, 39.7393, 40.3433, 43.4668, 49.9232, 49.9247, 53.8944, 54.5432,
@@ -250,7 +247,7 @@ albums:
         title: "Sunday Morning"
         duration: "2:58"
         artists: ["The Velvet Underground", "Nico"]
-        rating: love
+        rating: prefer
         plays: [
           0.1491, 0.3337, 1.0344, 1.6307, 2.4070, 3.3584, 4.5565, 5.6525, 6.6706, 11.1507,
           18.1324, 26.8695, 33.8196, 35.7916, 48.5266, 55.9652, 56.0545, 61.3411, 65.6598,
@@ -264,7 +261,7 @@ albums:
       - number: 2
         title: "I’m Waiting for the Man"
         duration: "4:42"
-        rating: best
+        rating: love
         plays: [
           0.0338, 0.1470, 0.2905, 1.0323, 1.4564, 1.9283, 4.8650, 5.7469, 6.4996, 6.6685, 11.1487,
           17.3992, 17.7082, 18.1303, 25.0761, 33.3007, 35.7895, 44.6025, 48.5245, 52.7503,
@@ -279,7 +276,7 @@ albums:
         title: "Femme Fatale"
         duration: "2:41"
         artists: ["The Velvet Underground", "Nico"]
-        rating: love
+        rating: prefer
         plays: [
           0.0373, 0.1437, 1.0290, 6.6652, 9.3507, 9.9880, 11.1452, 18.1268, 22.7291, 23.4899,
           29.3093, 35.7862, 48.5212, 55.1532, 60.2677, 61.3358, 64.4502, 65.6544, 81.5268,
@@ -291,7 +288,7 @@ albums:
       - number: 4
         title: "Venus in Furs"
         duration: "5:11"
-        rating: best
+        rating: love
         plays: [
           0.0015, 0.1418, 0.6674, 1.0270, 9.5045, 11.1433, 12.6616, 14.7273, 18.1250, 23.3327,
           35.7843, 37.8464, 44.6617, 48.5194, 55.5943, 61.3338, 65.6525, 81.5250, 128.5387,
@@ -316,7 +313,7 @@ albums:
         title: "All Tomorrow’s Parties"
         duration: "6:02"
         artists: ["The Velvet Underground", "Nico"]
-        rating: love
+        rating: prefer
         plays: [
           0.0385, 0.1350, 0.8574, 1.0203, 2.7799, 3.8664, 6.8511, 8.2905, 10.4263, 10.9786,
           11.1365, 16.8180, 18.1183, 32.5993, 35.7774, 48.5124, 61.3269, 65.6458, 71.5400,
@@ -327,7 +324,7 @@ albums:
       - number: 7
         title: "Heroin"
         duration: "7:15"
-        rating: best
+        rating: love
         plays: [
           0.1308, 1.0159, 2.6201, 4.8110, 11.1322, 13.7574, 18.1140, 18.2944, 18.9252, 21.5109,
           21.6679, 25.1098, 30.6887, 30.9847, 35.7732, 41.7815, 48.5080, 51.8669, 61.3226,
@@ -351,7 +348,7 @@ albums:
         duration: "2:16"
         artists: ["The Velvet Underground", "Nico"]
         genres: ["Art Rock", "Folk Rock"]
-        rating: love
+        rating: prefer
         plays: [
           0.1236, 1.0637, 4.4367, 11.1249, 26.2159, 35.7663, 36.9652, 48.5008, 58.1888, 60.2452,
           63.0449, 65.6344, 68.1019, 81.5072, 88.1075, 91.4385, 105.4889, 128.1492, 128.5204,
@@ -399,7 +396,7 @@ albums:
       - number: 2
         title: "Breathe (in the Air)"
         duration: "2:50"
-        rating: love
+        rating: prefer
         plays: [
           0.1488, 1.2350, 1.6368, 2.5099, 3.9903, 6.4202, 8.9247, 11.6517, 14.6664, 19.4615,
           20.6559, 26.5940, 27.0398, 27.7009, 35.5511, 44.7230, 55.3322, 60.0464, 87.6602,
@@ -424,7 +421,7 @@ albums:
       - number: 4
         title: "Time"
         duration: "6:53"
-        rating: best
+        rating: love
         plays: [
           0.1195, 0.1458, 0.2172, 0.2649, 1.2305, 1.6323, 2.5053, 3.0626, 3.1009, 4.0189, 4.5135,
           5.0590, 5.4194, 9.2080, 9.9061, 11.1614, 13.5358, 19.4569, 27.0353, 27.6963, 35.5465,
@@ -441,7 +438,7 @@ albums:
         title: "The Great Gig in the Sky"
         duration: "4:44"
         genres: ["Progressive Rock", "Blues Rock"]
-        rating: love
+        rating: prefer
         plays: [
           0.3870, 0.7109, 0.7225, 1.2256, 1.6272, 1.8299, 2.5004, 2.9726, 4.5087, 15.2805,
           19.4519, 27.0304, 27.6915, 29.9012, 31.1876, 35.5415, 44.4106, 57.5337, 60.0368,
@@ -456,7 +453,7 @@ albums:
       - number: 6
         title: "Money"
         duration: "6:23"
-        rating: best
+        rating: love
         plays: [
           0.0015, 0.4596, 1.2130, 1.2222, 1.4537, 1.6239, 2.4971, 4.5052, 5.6097, 9.4581, 10.5783,
           12.6549, 19.4487, 21.1560, 21.8878, 25.6579, 27.0270, 27.6883, 32.0296, 35.2642,
@@ -473,7 +470,7 @@ albums:
       - number: 7
         title: "Us and Them"
         duration: "7:49"
-        rating: love
+        rating: prefer
         plays: [
           0.5413, 0.6332, 1.2176, 1.5991, 1.6192, 2.4924, 4.5008, 8.0063, 14.7542, 19.4443,
           19.9557, 23.6684, 24.7785, 27.0224, 27.6836, 35.5334, 44.7089, 57.9898, 60.0290,
@@ -496,7 +493,7 @@ albums:
       - number: 9
         title: "Brain Damage"
         duration: "3:47"
-        rating: love
+        rating: prefer
         plays: [
           1.2096, 1.6115, 2.4846, 4.4950, 15.0476, 17.5583, 27.0145, 27.6757, 28.2643, 30.3070,
           33.5600, 35.3943, 35.5254, 39.8839, 42.8832, 44.7032, 49.3120, 52.3582, 60.0210,
@@ -508,7 +505,7 @@ albums:
       - number: 10
         title: "Eclipse"
         duration: "2:13"
-        rating: love
+        rating: prefer
         plays: [
           0.2754, 1.2068, 1.6089, 2.4820, 3.7646, 4.4923, 6.1120, 27.0117, 27.6731, 28.1531,
           35.5227, 41.2739, 43.3931, 44.7004, 51.1643, 60.0183, 60.6994, 71.0680, 87.6368,
@@ -543,7 +540,7 @@ albums:
       - number: 2
         title: "Dreams"
         duration: "4:18"
-        rating: best
+        rating: love
         plays: [
           0.0322, 0.0771, 0.5139, 0.5423, 0.8323, 1.0885, 1.3457, 2.1627, 2.5327, 3.0813, 4.4946,
           7.1510, 7.4052, 10.5632, 11.1489, 12.0600, 15.1189, 17.8299, 20.8296, 22.5315, 24.4282,
@@ -561,7 +558,7 @@ albums:
         title: "Never Going Back Again"
         duration: "2:15"
         genres: ["Folk Rock", "Soft Rock"]
-        rating: love
+        rating: prefer
         plays: [
           0.0740, 0.5394, 1.2366, 1.3427, 1.3463, 2.8742, 3.0784, 7.1481, 7.4021, 12.0571,
           14.3230, 15.1158, 18.3256, 23.9843, 26.3567, 28.5939, 37.6780, 53.7506, 56.7199,
@@ -575,7 +572,7 @@ albums:
       - number: 4
         title: "Don’t Stop"
         duration: "3:14"
-        rating: love
+        rating: prefer
         plays: [
           0.0249, 0.0724, 0.1934, 0.5378, 1.3411, 3.0768, 7.1465, 7.4004, 8.8314, 8.9980, 12.0555,
           15.1141, 28.5924, 28.9891, 32.0663, 53.7491, 56.0840, 56.7184, 59.6403, 61.6514,
@@ -590,7 +587,7 @@ albums:
       - number: 5
         title: "Go Your Own Way"
         duration: "3:40"
-        rating: best
+        rating: love
         plays: [
           0.0015, 0.0700, 0.0957, 0.1565, 0.5356, 1.2625, 1.3388, 3.0745, 3.6838, 7.1443, 7.3063,
           7.3981, 12.0532, 15.1119, 25.1969, 25.7522, 27.9997, 28.5900, 39.1946, 44.6562, 50.9966,
@@ -619,7 +616,7 @@ albums:
       - number: 7
         title: "The Chain"
         duration: "4:31"
-        rating: best
+        rating: love
         plays: [
           0.0651, 0.1207, 0.2331, 0.5328, 0.8706, 0.9504, 1.3337, 1.4541, 2.5422, 3.0695, 4.7098,
           7.1393, 7.3932, 8.4369, 8.9692, 9.5117, 10.5746, 12.0482, 15.1067, 21.2812, 28.5871,
@@ -636,7 +633,7 @@ albums:
       - number: 8
         title: "You Make Loving Fun"
         duration: "3:33"
-        rating: love
+        rating: prefer
         plays: [
           0.0618, 0.5297, 1.3306, 3.0664, 4.5837, 5.3031, 7.1362, 7.3901, 9.4643, 12.0450,
           15.1035, 17.5831, 28.5840, 38.4476, 51.7740, 53.7386, 56.7077, 60.1454, 61.6408,
@@ -671,7 +668,7 @@ albums:
       - number: 11
         title: "Gold Dust Woman"
         duration: "5:02"
-        rating: love
+        rating: prefer
         plays: [
           0.0542, 0.3760, 0.5248, 1.3229, 2.3817, 3.0609, 7.1308, 7.3823, 12.0372, 15.0960,
           17.9348, 18.2648, 28.5763, 28.8492, 32.8213, 34.7539, 53.7331, 56.7022, 62.7738,
@@ -694,7 +691,7 @@ albums:
       - number: 1
         title: "Wanna Be Startin’ Somethin’"
         duration: "6:03"
-        rating: love
+        rating: prefer
         plays: [
           0.0053, 0.1014, 0.2366, 0.8230, 1.5668, 2.0648, 3.1339, 3.1401, 4.2800, 4.9996, 5.0520,
           8.4885, 12.1968, 12.8134, 13.1850, 16.6064, 17.1720, 32.3561, 34.1050, 34.7313, 53.5279,
@@ -732,7 +729,7 @@ albums:
       - number: 4
         title: "Thriller"
         duration: "6:00"
-        rating: best
+        rating: love
         plays: [
           0.0154, 0.0940, 0.2262, 0.5455, 0.8128, 1.0326, 8.4808, 12.8059, 14.3356, 14.9251,
           16.5990, 30.5911, 31.3703, 34.0977, 34.7238, 36.5645, 40.9921, 49.1660, 58.4463,
@@ -750,7 +747,7 @@ albums:
         title: "Beat It"
         duration: "4:19"
         genres: ["Pop", "Rock", "Hard Rock"]
-        rating: best
+        rating: love
         plays: [
           0.0015, 0.0896, 0.1323, 0.4905, 0.8087, 1.9798, 2.9902, 3.5715, 8.1046, 8.4766, 12.8015,
           15.0786, 16.0448, 16.5947, 22.3768, 26.0245, 30.0492, 34.0936, 34.7194, 47.2189,
@@ -767,7 +764,7 @@ albums:
       - number: 6
         title: "Billie Jean"
         duration: "4:54"
-        rating: best
+        rating: love
         plays: [
           0.0865, 0.0910, 0.1495, 0.5007, 0.8057, 0.9798, 1.0950, 1.1288, 3.6190, 6.4937, 7.9813,
           12.0463, 12.7983, 12.9108, 16.4368, 16.5916, 16.9031, 19.8417, 22.6340, 34.0905,
@@ -786,7 +783,7 @@ albums:
         title: "Human Nature"
         duration: "4:06"
         genres: ["Pop", "Soft Rock", "Quiet Storm"]
-        rating: love
+        rating: prefer
         plays: [
           0.0113, 0.0830, 0.3477, 0.8022, 5.7570, 5.8751, 11.7481, 12.7948, 16.5881, 30.1932,
           34.0871, 34.7129, 42.5029, 42.6118, 49.8078, 71.9365, 74.1900, 74.6092, 77.4967,
@@ -800,7 +797,7 @@ albums:
       - number: 8
         title: "P.Y.T. (Pretty Young Thing)"
         duration: "3:59"
-        rating: love
+        rating: prefer
         plays: [
           0.0801, 0.0942, 0.3221, 0.7994, 7.8448, 10.3963, 10.4186, 11.3226, 12.7919, 16.5853,
           17.1703, 21.2335, 34.0841, 34.7101, 40.9002, 48.6973, 74.6063, 75.6320, 81.4058,
@@ -823,10 +820,10 @@ albums:
         ]
 
   - title: "Purple Rain"
-    album_artist: "Prince and The Revolution"
-    artists: ["Prince", "The Revolution"]
+    album_artist: "Prince"
+    artists: ["Prince"]
     year: 1984
-    genres: ["Pop Rock", "Funk", "R&B", "Rock"]
+    genres: ["Pop", "Funk", "R&B", "Rock"]
     musicbrainz:
       release_group: b93a7c47-a6d4-33f2-9034-53fdd991f4ba
       release: 45c7c7b7-5f62-4f30-84b5-a0dc31f3a278
@@ -834,7 +831,7 @@ albums:
       - number: 1
         title: "Let’s Go Crazy"
         duration: "4:40"
-        rating: best
+        rating: love
         plays: [
           1.1754, 1.5592, 1.6704, 1.8594, 3.3007, 3.7273, 4.7934, 5.8517, 12.3840, 28.1560,
           34.9715, 37.4393, 53.2776, 54.0969, 57.3416, 57.8860, 59.3855, 66.0755, 66.8616,
@@ -861,7 +858,7 @@ albums:
       - number: 3
         title: "The Beautiful Ones"
         duration: "5:14"
-        rating: love
+        rating: prefer
         plays: [
           1.1693, 3.7237, 4.7874, 5.8456, 8.4145, 10.2133, 20.1117, 51.3531, 52.7691, 54.0910,
           57.8800, 66.8555, 74.6274, 89.0827, 92.5282, 96.5246, 96.8080, 103.5505, 105.4881,
@@ -888,7 +885,7 @@ albums:
         title: "Darling Nikki"
         duration: "4:15"
         genres: ["Funk Rock", "Rock"]
-        rating: love
+        rating: prefer
         plays: [
           0.2928, 0.4367, 1.6351, 3.1997, 3.7173, 4.7811, 5.8391, 6.6883, 10.3118, 29.0853,
           29.2682, 36.6495, 43.1444, 47.6486, 54.0844, 57.8733, 66.8488, 74.6211, 87.5438,
@@ -902,7 +899,7 @@ albums:
         title: "When Doves Cry"
         duration: "5:54"
         genres: ["Funk", "Synth-Funk", "New Wave"]
-        rating: best
+        rating: love
         plays: [
           0.0015, 0.0133, 0.3109, 0.9659, 1.8198, 3.7142, 4.5974, 4.7780, 4.8082, 5.5424, 6.1835,
           6.9756, 11.2861, 13.1272, 14.2532, 14.5570, 29.5276, 30.0687, 31.0993, 33.5164, 50.7357,
@@ -918,7 +915,7 @@ albums:
       - number: 7
         title: "I Would Die 4 U"
         duration: "2:49"
-        rating: love
+        rating: prefer
         plays: [
           0.0628, 1.3130, 3.7100, 4.7737, 14.6466, 18.6221, 18.8206, 40.1269, 47.8330, 48.7023,
           53.3121, 54.0773, 57.8662, 61.9663, 66.8417, 69.1425, 74.6139, 89.1608, 91.7237,
@@ -943,7 +940,7 @@ albums:
         title: "Purple Rain"
         duration: "8:41"
         genres: ["Rock", "Power Ballad"]
-        rating: best
+        rating: love
         plays: [
           0.0066, 0.0450, 0.0667, 0.1528, 2.0168, 3.0585, 3.7078, 3.8995, 4.7153, 4.7686, 5.8822,
           11.0555, 11.2014, 12.6955, 21.0468, 21.9626, 27.2399, 27.9076, 29.1852, 38.1040,
