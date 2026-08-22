@@ -6,6 +6,11 @@ use symphonia::core::probe::{Hint, ProbeResult};
 
 use super::types::{TrackArtistMetadata, TrackMetadata};
 
+/// Longest duration we are willing to believe a single audio file reports. Comfortably above any
+/// real track, live set, or audiobook chapter, and far below the magnitudes that corrupt container
+/// metadata produces.
+const MAX_PLAUSIBLE_DURATION_SECS: f64 = 24.0 * 60.0 * 60.0;
+
 pub fn extension_to_format(ext: &str) -> Option<&'static str> {
     match ext.to_ascii_lowercase().as_str() {
         "aac" => Some("aac"),
@@ -136,7 +141,18 @@ fn probe_file(file_path: &Path) -> Option<(ProbeResult, f64)> {
     }
 
     let meta_opts = MetadataOptions::default();
-    let fmt_opts = FormatOptions::default();
+
+    // `enable_gapless` makes symphonia derive an Ogg stream's frame count straight from the final
+    // page's absolute granule position, rather than from that position plus an "end delay" measured
+    // against the preceding page. Some Ogg Vorbis files carry a run of placeholder pages before the
+    // end-of-stream page whose granule position is -1 ("no packet completes here"). Symphonia maps
+    // that sentinel to a timestamp of u64::MAX, so the end delay it infers is astronomical and the
+    // frame count saturates at u64::MAX — yielding a duration of ~418 trillion seconds. Skipping
+    // the end delay both dodges that and reports the true playable length.
+    let fmt_opts = FormatOptions {
+        enable_gapless: true,
+        ..Default::default()
+    };
 
     let probed = symphonia::default::get_probe()
         .format(&hint, mss, &fmt_opts, &meta_opts)
@@ -150,7 +166,25 @@ fn probe_file(file_path: &Path) -> Option<(ProbeResult, f64)> {
         Some(time.seconds as f64 + time.frac)
     });
 
-    Some((probed, duration_secs.unwrap_or(0.0)))
+    // Gapless decoding does not rescue a file whose end-of-stream page is itself the one carrying
+    // the -1 granule, and other container formats have their own ways of reporting nonsense. Treat
+    // an implausible duration as undetermined: a bogus value would otherwise be stored as a
+    // duration no human could have produced, and one large enough overflows the INTERVAL that
+    // `to_seconds` widens it into, failing the whole scan batch.
+    // `contains` also rejects NaN and infinity, both of which compare false against any bound.
+    let duration_secs = match duration_secs {
+        Some(secs) if (0.0..=MAX_PLAUSIBLE_DURATION_SECS).contains(&secs) => secs,
+        Some(secs) => {
+            eprintln!(
+                "Warning: implausible duration ({secs}s) for {}, recording as unknown",
+                file_path.display()
+            );
+            0.0
+        }
+        None => 0.0,
+    };
+
+    Some((probed, duration_secs))
 }
 
 /// Analyze a file to get its duration in seconds. Returns 0.0 if undetermined.
