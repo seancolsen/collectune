@@ -9,7 +9,6 @@
   "display_override": ["standalone", "minimal-ui"],
   "orientation": "any",
   "background_color": "#ffffff",
-  "theme_color": "#f8f8f8",
   "lang": "en",
   "dir": "ltr",
   "categories": ["music", "entertainment"],
