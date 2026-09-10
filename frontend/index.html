@@ -48,20 +48,26 @@
     -->
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
 
-    <!-- Tints the Android status bar / desktop title bar to match the surface the
-         app paints under it. Kept in sync with a forced theme by the bootstrap
-         script below. -->
+    <!--
+      Tints the Android status bar / desktop title bar to match the surface the
+      app paints under it. Exactly one `theme-color` meta, rewritten by the
+      bootstrap script below and thereafter by `applyThemeToDocument` — never a
+      pair of `prefers-color-scheme` metas plus a scripted override. A user
+      agent honors the *first* `theme-color` whose `media` matches, so a
+      media-less meta appended by script can never outrank an earlier matching
+      one: forcing dark on a light-mode phone left the status bar painted our
+      light `#f8f8f8` while the app under it went dark, and the system's own
+      status-bar icons became unreadable against it.
+
+      The manifest deliberately carries no `theme_color` to pair with this
+      (JSON can't hold the comment, so it lives here). An installed Android web
+      app bakes that value in and can go on painting the status bar with it,
+      ignoring this meta entirely — and a single baked color can't be right for
+      an app with two themes. Omitted, the choice falls to the OS, which tints
+      the bar to the system appearance its own icons are drawn for.
+    -->
     <meta name="color-scheme" content="light dark" />
-    <meta
-      name="theme-color"
-      content="#f8f8f8"
-      media="(prefers-color-scheme: light)"
-    />
-    <meta
-      name="theme-color"
-      content="#1b1b1b"
-      media="(prefers-color-scheme: dark)"
-    />
+    <meta name="theme-color" content="#f8f8f8" />
 
     <!-- BEGIN generated: ios-launch-images (cargo xtask icons) -->
     <link
@@ -188,21 +194,26 @@
 
     <script>
       // Runs before first paint so a forced theme never flashes the other one's
-      // background. Mirrors the app's stored-preference read.
+      // background. Mirrors the app's stored-preference read, and points the
+      // `theme-color` meta above at whichever surface wins — a stored override
+      // or, absent one, the system preference. `applyThemeToDocument` in
+      // `state/store.tsx` keeps both in step from here on.
       (function () {
+        var pref = null;
         try {
           var stored = localStorage.getItem("theme");
-          if (stored === "light" || stored === "dark") {
-            document.documentElement.setAttribute("data-theme", stored);
-            var meta = document.createElement("meta");
-            meta.name = "theme-color";
-            meta.content = stored === "dark" ? "#1b1b1b" : "#f8f8f8";
-            document.head.appendChild(meta);
-          }
+          if (stored === "light" || stored === "dark") pref = stored;
         } catch (e) {
           // Private-mode localStorage denial. Falling back to the system
           // preference is what the app itself does too.
         }
+        if (pref) document.documentElement.setAttribute("data-theme", pref);
+        var dark =
+          pref === "dark" ||
+          (pref === null &&
+            window.matchMedia("(prefers-color-scheme: dark)").matches);
+        var meta = document.querySelector('meta[name="theme-color"]');
+        if (meta) meta.content = dark ? "#1b1b1b" : "#f8f8f8";
       })();
     </script>
   </head>
